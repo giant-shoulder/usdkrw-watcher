@@ -18,7 +18,7 @@ import pytz
 
 # 📌 설정
 INVESTING_URL = "https://www.investing.com/currencies/usd-krw"
-CHECK_INTERVAL = 300  # 5분마다 확인
+CHECK_INTERVAL = 180  # 3분마다 확인
 ALERT_THRESHOLD = 0.5  # 0.5원 이상 변동 시 알림
 last_rate = None
 
