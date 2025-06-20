@@ -175,8 +175,8 @@ async def send_telegram_message(message):
     now = datetime.now(pytz.timezone('Asia/Seoul'))
     current_hour = now.hour
 
-    # 새벽 1시부터 7시까지는 알림 차단
-    if 1 <= current_hour < 7:
+    # 새벽 2시부터 7시까지는 알림 차단
+    if 2 <= current_hour < 7:
         print(f"🕐 현재 시각 {current_hour}시 - 알림 발송 시간 아님")
         return
 
