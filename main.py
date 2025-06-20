@@ -1,4 +1,5 @@
 import asyncio
+import os
 import time
 import requests
 from bs4 import BeautifulSoup
@@ -22,8 +23,16 @@ ALERT_THRESHOLD = 0.5  # 0.5원 이상 변동 시 알림
 last_rate = None
 
 # 텔레그램 설정
-TELEGRAM_TOKEN = '7886487476:AAGVZNaFtUdzqR5o9AWbBNHFV5bJy4ph2sM'
-CHAT_IDS = ['7650730456', '70421286']
+# TELEGRAM_TOKEN = '7886487476:AAGVZNaFtUdzqR5o9AWbBNHFV5bJy4ph2sM'
+# CHAT_IDS = ['7650730456', '70421286']
+
+# railway 환경 변수에서 토큰과 채팅 ID 가져오기
+# 텔레그램 봇 토큰
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+
+# 여러 사용자 chat_id 목록 (쉼표로 구분하여 환경변수에 저장: 예 "123,456,789")
+chat_id_list_str = os.environ.get("CHAT_IDS", "")
+chat_ids = chat_id_list_str.split(",") if chat_id_list_str else []
 
 bot = Bot(token=TELEGRAM_TOKEN)
 
@@ -171,12 +180,12 @@ async def send_telegram_message(message):
         print(f"🕐 현재 시각 {current_hour}시 - 알림 발송 시간 아님")
         return
 
-    for chat_id in CHAT_IDS:
+    for chat_id in chat_ids:
         try:
-            await bot.send_message(chat_id=chat_id, text=message)
-            print(f"📤 전송 완료 → {chat_id}")
+            await bot.send_message(chat_id=chat_id.strip(), text=message)
+            print(f"✅ 전송 완료 → {chat_id}")
         except Exception as e:
-            print(f"❌ 전송 실패 ({chat_id}):", e)
+            print(f"❌ 전송 실패 ({chat_id}): {e}")
 
 # ✅ 메인 루프
 async def main():
