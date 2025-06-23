@@ -18,7 +18,7 @@ JUMP_THRESHOLD = 1.0  # 급등락 기준
 # 텔레그램 & API 설정
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 chat_ids = os.environ.get("CHAT_IDS", "").split(",")
-access_key = os.environ.get("EXCHANGERATE_API_KEY")
+
 bot = Bot(token=TELEGRAM_TOKEN)
 
 # === DB 초기화 ===
@@ -48,6 +48,7 @@ def get_recent_rates(limit):
 
 # === 환율 가져오기 (exchangerate.host)
 def get_usdkrw_rate():
+    access_key = os.environ.get("EXCHANGERATE_API_KEY")
     if not access_key:
         print("❗ 환경변수 'EXCHANGERATE_API_KEY' 누락")
         return None
