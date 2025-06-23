@@ -6,8 +6,7 @@ from datetime import datetime
 import pytz
 from statistics import mean, stdev
 from telegram import Bot
-from dotenv import load_dotenv
-load_dotenv(override=True)  # ✅ 이미 등록된 환경 변수도 덮어씀
+
 
 # === 설정 ===
 DB_FILE = "usdkrw_rates.db"
