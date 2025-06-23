@@ -120,11 +120,7 @@ async def main():
     last_rate = None
     while True:
         now = datetime.now(pytz.timezone("Asia/Seoul"))
-        if 2 <= now.hour < 7:
-            print(f"⏸️ {now.strftime('%H:%M')} - 야간 중지")
-            await asyncio.sleep(CHECK_INTERVAL)
-            continue
-
+        
         current_rate = get_usdkrw_rate()
         if current_rate:
             print(f"📌 현재 환율: {current_rate:.2f}원")
