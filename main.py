@@ -6,7 +6,8 @@ from datetime import datetime
 import pytz
 from statistics import mean, stdev
 from telegram import Bot
-
+from dotenv import load_dotenv
+load_dotenv()  # ✅ 이미 등록된 환경 변수도 덮어씀
 
 # === 설정 ===
 DB_FILE = "usdkrw_rates.db"
@@ -136,20 +137,22 @@ async def main():
                 for msg in signals:
                     await send_telegram(msg)
 
-            # ⚡ 급격한 변동
+            # ⚡ 급격한 변동 감지
             if last_rate:
                 diff = current_rate - last_rate
-                if diff > 0:
-                    emoji_text = "🔺📈 급변 상승 감지!"  # 상승
-                else:
-                    emoji_text = "🔵📉 급변 하락 감지!"  # 하락 + 파란색 원
 
-                await send_telegram(
-                    f"{emoji_text}\n"
-                    f"현재: {current_rate:.2f}원\n"
-                    f"이전: {last_rate:.2f}원\n"
-                    f"변동: {diff:.2f}원"
-                )
+                if abs(diff) >= JUMP_THRESHOLD:  # ✅ 급변 조건 추가
+                    if diff > 0:
+                        emoji_text = "🔺📈 급변 상승 감지!"  # 상승
+                    else:
+                        emoji_text = "🔵📉 급변 하락 감지!"  # 하락 + 파란색 원
+
+                    await send_telegram(
+                        f"{emoji_text}\n"
+                        f"현재: {current_rate:.2f}원\n"
+                        f"이전: {last_rate:.2f}원\n"
+                        f"변동: {diff:.2f}원"
+                    )
 
             last_rate = current_rate
 
