@@ -6,12 +6,14 @@ from datetime import datetime
 import pytz
 from statistics import mean, stdev
 from telegram import Bot
+from dotenv import load_dotenv
+load_dotenv(override=True)  # ✅ 이미 등록된 환경 변수도 덮어씀
 
 # === 설정 ===
 DB_FILE = "usdkrw_rates.db"
-CHECK_INTERVAL = 600  # 10분
+CHECK_INTERVAL = 260  # 4분20초
 MOVING_AVERAGE_PERIOD = 16  # 약 5일치 (30분 간격)
-JUMP_THRESHOLD = 2.0  # 급등락 기준
+JUMP_THRESHOLD = 1.0  # 급등락 기준
 
 # 텔레그램 & API 설정
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
@@ -49,6 +51,7 @@ def get_usdkrw_rate():
     if not access_key:
         print("❗ 환경변수 'EXCHANGERATE_API_KEY' 누락")
         return None
+    
     url = f"https://api.exchangerate.host/live?access_key={access_key}&currencies=KRW"
     try:
         res = requests.get(url, timeout=10)
@@ -90,12 +93,12 @@ def analyze_signals(rates, current_rate):
 
     # 📉 매수 시그널
     if current_rate < lower and current_rate < ma:
-        messages.append(f"📉 매수 기회 감지!\n현재: {current_rate:.2f}원\n"
+        messages.append(f"🔵📉 매수 시그널 감지!\n현재: {current_rate:.2f}원\n"
                         f"이동평균: {ma:.2f}원\n하단밴드: {lower:.2f}원")
 
     # 📈 매도 시그널
     elif current_rate > upper and current_rate > ma:
-        messages.append(f"📈 매도 주의 감지!\n현재: {current_rate:.2f}원\n"
+        messages.append(f"🔺📈 매도 시그널 감지!\n현재: {current_rate:.2f}원\n"
                         f"이동평균: {ma:.2f}원\n상단밴드: {upper:.2f}원")
 
     return messages
@@ -108,11 +111,11 @@ async def main():
     await send_telegram(
         "👋 USD/KRW 환율 모니터링을 시작합니다!\n\n"
         "📊 전략 안내\n"
-        "・10분 간격 실시간 조회\n"
+        "・4분20초 간격 실시간 조회\n"
         "・5일치 데이터 기반 이동평균 및 볼린저 밴드 계산\n"
         "・📉 매수 알림: 환율이 하단 밴드 이탈 + 평균보다 낮을 때\n"
         "・📈 매도 알림: 환율이 상단 밴드 돌파 + 평균보다 높을 때\n"
-        "・⚡ 급변 알림: 10분 내 ±2원 이상 변동 시\n\n"
+        "・⚡ 급변 알림: 4분20초 내 ±1원 이상 변동 시\n\n"
         "※ 새벽 2시~7시는 알림이 일시 중단됩니다. \n"
         "(데이터 조회는 계속 진행됩니다.)"
     )
@@ -136,14 +139,17 @@ async def main():
             # ⚡ 급격한 변동
             if last_rate:
                 diff = current_rate - last_rate
-                if abs(diff) >= JUMP_THRESHOLD:
-                    emoji = "🔺" if diff > 0 else "🔻"
-                    await send_telegram(
-                        f"{emoji} 급변 감지!\n"
-                        f"현재: {current_rate:.2f}원\n"
-                        f"이전: {last_rate:.2f}원\n"
-                        f"변동: {diff:.2f}원"
-                    )
+                if diff > 0:
+                    emoji_text = "🔺📈 급변 상승 감지!"  # 상승
+                else:
+                    emoji_text = "🔵📉 급변 하락 감지!"  # 하락 + 파란색 원
+
+                await send_telegram(
+                    f"{emoji_text}\n"
+                    f"현재: {current_rate:.2f}원\n"
+                    f"이전: {last_rate:.2f}원\n"
+                    f"변동: {diff:.2f}원"
+                )
 
             last_rate = current_rate
 
