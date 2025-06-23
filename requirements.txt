@@ -1,7 +1,3 @@
 python-telegram-bot==20.8
 requests
-beautifulsoup4
-selenium
-webdriver-manager
 pytz
-playwright
