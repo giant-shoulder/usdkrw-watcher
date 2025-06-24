@@ -88,9 +88,9 @@ def analyze_bollinger(rates, current):
     upper = avg + 2 * std
     lower = avg - 2 * std
     if current > upper:
-        return f"📈 본린저 밴드 상단 돌파!(매수 유효 시점)\n이동평균: {avg:.2f}\n현재: {current:.2f}\n상단: {upper:.2f}"
+        return f"📈 본린저 밴드 상단 돌파!(매도 검토 시점)\n이동평균: {avg:.2f}\n현재: {current:.2f}\n상단: {upper:.2f}"
     elif current < lower:
-        return f"📉 볼린저 밴드 하단 이탈!(매도 검토 시점)\n이동평균: {avg:.2f}\n현재: {current:.2f}\n하단: {lower:.2f}"
+        return f"📉 볼린저 밴드 하단 이탈!(매수 유효 시점)\n이동평균: {avg:.2f}\n현재: {current:.2f}\n하단: {lower:.2f}"
     return None
 
 # 급격한 변동 분석
