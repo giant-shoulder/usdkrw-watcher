@@ -202,7 +202,7 @@ async def main():
             if c_msg: await send_telegram(c_msg)
 
             # 조합
-            combo = analyze_combo(b_type, j_msg, c_msg)
+            combo = analyze_combo(b_message, j_msg, c_msg)
             if combo: await send_telegram(combo)
 
             # 연속 돌파 + 분석
