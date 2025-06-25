@@ -195,6 +195,11 @@ async def main():
 
     while True:
         rate = get_usdkrw_rate()
+        rate = get_usdkrw_rate()
+        if rate:
+            print(f"📈 API 조회된 환율: {rate}")
+        else:
+            print("❌ 환율 조회 실패 (None 반환됨)")
         if rate:
             await store_rate(conn, rate)
             rates = await get_recent_rates(conn, LONG_TERM_PERIOD)
