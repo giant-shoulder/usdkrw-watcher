@@ -34,8 +34,21 @@ async def connect_to_db():
     db_host = os.environ.get("DB_HOST")
     db_port = os.environ.get("DB_PORT", "5432")
     db_name = os.environ.get("DB_NAME")
+
+    if not all([db_user, db_password, db_host, db_name]):
+        raise ValueError("❗ 환경변수 누락: DB_USER, DB_PASSWORD, DB_HOST, DB_NAME")
+
     db_url = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
-    return await asyncpg.connect(db_url)
+
+    # ✅ 실제 연결은 이걸 사용
+    # db_url 그대로 사용
+
+    # 🔒 로그 출력 시 비밀번호는 마스킹
+    masked_url = f"postgresql://{db_user}:*****@{db_host}:{db_port}/{db_name}"
+    print(f"📡 DB 연결 시도 중: {masked_url}")
+
+    conn = await asyncpg.connect(dsn=db_url, statement_cache_size=0)  # 🔧 여기 추가
+    return conn
 
 # 환율 가져오기 (API)
 def get_usdkrw_rate():
