@@ -195,7 +195,6 @@ async def main():
 
     while True:
         rate = get_usdkrw_rate()
-        rate = get_usdkrw_rate()
         if rate:
             print(f"📈 API 조회된 환율: {rate}")
         else:
