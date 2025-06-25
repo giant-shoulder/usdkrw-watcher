@@ -1,2 +1,3 @@
 .env
 usdkrw_rates.db
+main_backup_*.py
