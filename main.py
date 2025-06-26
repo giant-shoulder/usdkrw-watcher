@@ -20,10 +20,10 @@ CHAT_IDS = os.environ.get("CHAT_IDS", "").split(",")
 bot = Bot(token=TELEGRAM_TOKEN)
 
 # 설정
-CHECK_INTERVAL = 210           # 3분 30초
-MOVING_AVERAGE_PERIOD = 43     # 볼린저: 2.5시간
-SHORT_TERM_PERIOD = 86         # 단기 평균선 (골든/데드 크로스 비교 대상): 5시간
-LONG_TERM_PERIOD = 292         # 장기 평균선 (골든/데드 크로스 기준선): 17시간
+CHECK_INTERVAL = 260           # 4분 20초
+MOVING_AVERAGE_PERIOD = 35     # 볼린저: 2.5시간
+SHORT_TERM_PERIOD = 69         # 단기 평균선 (골든/데드 크로스 비교 대상): 5시간
+LONG_TERM_PERIOD = 238         # 장기 평균선 (골든/데드 크로스 기준선): 17시간
 JUMP_THRESHOLD = 1.0           # 급등/락 기준
 
 bollinger_streak = 0  # 연속 상단 돌파 카운터
@@ -379,7 +379,7 @@ async def main():
         "• 골든/데드크로스: 단기 평균(5시간)이 장기 평균(17시간)보다 크거나 작아질 때\n"
         "• 조합 전략: 위 조건 중 2가지 이상이 동시에 나타나면 추가 알림 발송\n\n"
         f"⏱️ 확인 주기: {CHECK_INTERVAL // 60}분 {CHECK_INTERVAL % 60}초마다 체크합니다\n"
-        "🌙 *단, 오전 2시부터 7시까지는 조회 및 알림이 일시 중단됩니다.*"
+        "🌙 *단, 오전 2시부터 7시까지는 알림이 일시 중단됩니다.*"
     )
 
     conn = await connect_to_db()
@@ -389,10 +389,10 @@ async def main():
     lower_streak = 0
 
     while True:
-        if not is_allowed_time():
-            print(f"[{datetime.now()}] ⏸️ 2시~7시 사이, API 호출 중지 중...")
-            await asyncio.sleep(CHECK_INTERVAL)
-            continue
+        # if not is_allowed_time():
+        #     print(f"[{datetime.now()}] ⏸️ 2시~7시 사이, API 호출 중지 중...")
+        #     await asyncio.sleep(CHECK_INTERVAL)
+        #     continue
 
         rate = get_usdkrw_rate()
         if rate:
