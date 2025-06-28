@@ -117,10 +117,10 @@ def analyze_bollinger(rates, current):
 
     if current > upper:
         status = "upper_breakout"
-        message = f"📈 볼린저 밴드 상단 돌파!(매도 검토 시점)\n이동평균: {avg:.2f}\n현재: {current:.2f}\n상단: {upper:.2f}"
+        message = f"📈 볼린저 밴드 상단 돌파!\n이동평균: {avg:.2f}\n현재: {current:.2f}\n상단: {upper:.2f}"
     elif current < lower:
         status = "lower_breakout"
-        message = f"📉 볼린저 밴드 하단 이탈!(매수 유효 시점)\n이동평균: {avg:.2f}\n현재: {current:.2f}\n하단: {lower:.2f}"
+        message = f"📉 볼린저 밴드 하단 이탈!\n이동평균: {avg:.2f}\n현재: {current:.2f}\n하단: {lower:.2f}"
     else:
         status, message = None, None
 
