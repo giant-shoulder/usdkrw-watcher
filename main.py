@@ -20,10 +20,10 @@ CHAT_IDS = os.environ.get("CHAT_IDS", "").split(",")
 bot = Bot(token=TELEGRAM_TOKEN)
 
 # 설정
-CHECK_INTERVAL = 260           # 4분 20초
-MOVING_AVERAGE_PERIOD = 35     # 볼린저: 2.5시간
-SHORT_TERM_PERIOD = 69         # 단기 평균선 (골든/데드 크로스 비교 대상): 5시간
-LONG_TERM_PERIOD = 238         # 장기 평균선 (골든/데드 크로스 기준선): 17시간
+CHECK_INTERVAL = 200           # 3분 20초
+MOVING_AVERAGE_PERIOD = 45     # 볼린저: 2.5시간
+SHORT_TERM_PERIOD = 90         # 단기 평균선 (골든/데드 크로스 비교 대상): 5시간
+LONG_TERM_PERIOD = 306         # 장기 평균선 (골든/데드 크로스 기준선): 17시간
 JUMP_THRESHOLD = 1.0           # 급등/락 기준
 
 bollinger_streak = 0  # 연속 상단 돌파 카운터
@@ -379,11 +379,11 @@ def analyze_streak_logic(upper_streak, lower_streak, cross_signal, jump_signal):
 
     return None
 
-# 시간 제외 로직
-def is_allowed_time():
-    """2시~7시 사이 제외 로직"""
+# 주말 확인 함수
+def is_weekend():
+    """토요일(5), 일요일(6)에는 True 반환"""
     now = datetime.now(pytz.timezone("Asia/Seoul"))
-    return not (2 <= now.hour < 7)
+    return now.weekday() >= 5
 
 # 메인 루프
 async def main():
@@ -410,10 +410,10 @@ async def main():
     lower_streak = 0
 
     while True:
-        # if not is_allowed_time():
-        #     print(f"[{datetime.now()}] ⏸️ 2시~7시 사이, API 호출 중지 중...")
-        #     await asyncio.sleep(CHECK_INTERVAL)
-        #     continue
+        if is_weekend():
+            print(f"[{datetime.now()}] ⏸️ 주말, API 호출 중지 중...")
+            await asyncio.sleep(CHECK_INTERVAL)
+            continue
 
         rate = get_usdkrw_rate()
         if rate:
