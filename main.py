@@ -245,7 +245,7 @@ def analyze_combo(b_msg, j_msg, c_msg):
         score=total_score,
         signal_type=action_type,
         max_score=100,
-        bar_length=20
+        bar_length=10
     )
 
     # 전체 메시지 조합
@@ -451,24 +451,29 @@ async def main():
                 upper_streak = 0
                 lower_streak = 0
 
-            # 개별 알림
+            # 개별 메시지 전송
             if b_message: await send_telegram(b_message)
             if j_msg: await send_telegram(j_msg)
             if c_msg: await send_telegram(c_msg)
 
-            # 조합 전략 분석 및 시각화 전송
+            # 복합 전략 분석
             combo_result = analyze_combo(b_message, j_msg, c_msg)
-            if combo_result:
-                await send_telegram(combo_result["message"])
-
-            # 연속 전략 분석
             streak_msg = analyze_streak_logic(
                 upper_streak, lower_streak,
                 cross_signal=c_msg,
                 jump_signal=j_msg
             )
-            if streak_msg:
-                await send_telegram(streak_msg)
+
+            if combo_result:
+                # combo 메시지가 우선, streak는 참고로 추가
+                message = combo_result["message"]
+                if streak_msg and combo_result["type"] != "conflict":
+                    message += f"\n\n🧭 *추가 참고:* (연속 돌파 시나리오)\n{streak_msg}"
+                await send_telegram(message)
+            else:
+                # combo가 없을 경우 streak 단독 알림
+                if streak_msg:
+                    await send_telegram(streak_msg)
 
             prev_rate = rate
 
