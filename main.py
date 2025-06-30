@@ -443,7 +443,7 @@ def is_weekend():
 # 메인 루프
 async def main():
     await send_telegram(
-        "👋 USD/KRW 환율 모니터링을 시작합니다!\n\n"
+        "👋 USD/KRW 환율 모니터링을 재시작합니다!\n\n"
         "📊 [알림 기준 안내]\n"
         "• 📉 *환율이 평소보다 많이 떨어지거나*\n"
         "• 📈 *갑자기 크게 오르거나*\n"
@@ -459,13 +459,14 @@ async def main():
     )
 
     conn = await connect_to_db()
-    # streak 카운터 및 알림 단계 초기화
-    upper_streak = 0
-    lower_streak = 0
-    upper_streak_alert_level = 0
-    lower_streak_alert_level = 0
     prev_rate = None
     prev_short_avg, prev_long_avg = None, None
+    upper_streak = 0
+    lower_streak = 0
+
+    # streak 알림 레벨 추적 변수
+    prev_upper_streak_alert_level = 0
+    prev_lower_streak_alert_level = 0
 
     while True:
         if is_weekend():
@@ -478,17 +479,17 @@ async def main():
             print(f"📈 API 조회된 환율: {rate}")
         else:
             print("❌ 환율 조회 실패 (None 반환됨)")
-
+        
         if rate:
             await store_rate(conn, rate)
             rates = await get_recent_rates(conn, LONG_TERM_PERIOD)
 
-            # 개별 전략 분석
+            # ✅ prev_rate 추가 전달
             b_status, b_message = analyze_bollinger(rates, rate, prev=prev_rate)
             j_msg = analyze_jump(prev_rate, rate)
             c_msg, prev_short_avg, prev_long_avg = analyze_cross(rates, prev_short_avg, prev_long_avg)
 
-            # 연속 상하단 돌파 streak 카운트
+            # streak 관리
             if b_status == "upper_breakout":
                 upper_streak += 1
                 lower_streak = 0
@@ -507,29 +508,31 @@ async def main():
             # 복합 전략 분석
             combo_result = analyze_combo(b_message, j_msg, c_msg)
 
-            # 연속 돌파 전략 분석 (중복 방지 포함)
-            up_level, low_level, streak_msg = analyze_streak_logic(
-                upper_streak,
-                lower_streak,
+            # ✅ 연속 전략 분석 (레벨 업데이트도 함께)
+            new_upper_alert_level, new_lower_alert_level, streak_msg = analyze_streak_logic(
+                upper_streak, lower_streak,
                 cross_signal=c_msg,
                 jump_signal=j_msg,
-                prev_upper_streak_alert_level=upper_streak_alert_level,
-                prev_lower_streak_alert_level=lower_streak_alert_level
+                prev_upper_streak_alert_level=prev_upper_streak_alert_level,
+                prev_lower_streak_alert_level=prev_lower_streak_alert_level
             )
 
-            upper_streak_alert_level = up_level
-            lower_streak_alert_level = low_level
+            # ✅ 알림 레벨 업데이트
+            prev_upper_streak_alert_level = new_upper_alert_level
+            prev_lower_streak_alert_level = new_lower_alert_level
 
-            # ✅ 알림 우선순위 처리
             if combo_result:
+                # combo 메시지가 우선, streak는 참고로 추가
                 message = combo_result["message"]
                 if streak_msg and combo_result["type"] != "conflict":
                     message += f"\n\n🧭 *추가 참고:* (연속 돌파 시나리오)\n{streak_msg}"
                 await send_telegram(message)
             else:
+                # combo가 없을 경우 streak 단독 알림
                 if streak_msg:
                     await send_telegram(streak_msg)
 
+            # 이전 환율 저장
             prev_rate = rate
 
         await asyncio.sleep(CHECK_INTERVAL)
