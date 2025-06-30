@@ -484,7 +484,7 @@ async def main():
             rates = await get_recent_rates(conn, LONG_TERM_PERIOD)
 
             # 개별 전략 분석
-            b_status, b_message = analyze_bollinger(rates, rate)
+            b_status, b_message = analyze_bollinger(rates, rate, prev=prev_rate)
             j_msg = analyze_jump(prev_rate, rate)
             c_msg, prev_short_avg, prev_long_avg = analyze_cross(rates, prev_short_avg, prev_long_avg)
 
