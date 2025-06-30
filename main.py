@@ -199,7 +199,7 @@ def analyze_combo(b_msg, j_msg, c_msg):
     }
     total_score = sum(weights.get(k, 0) for k in active_signals)
 
-    # 점수 기반 시각적 헤더
+    # 점수 기반 헤더
     if total_score >= 80:
         header = "🔥 *[강력한 복합 전략 감지]*"
     elif total_score >= 60:
@@ -211,31 +211,42 @@ def analyze_combo(b_msg, j_msg, c_msg):
     detail_lines = [f"{k}\n{v}" for k, v in active_signals.items()]
     summary = "\n\n".join(detail_lines)
 
-    # 방향성 판단 키워드 세트
-    buy_keywords = {"하단", "하락", "골든크로스", "급반등", "반전"}
+    # 방향성 판단 키워드
+    buy_keywords = {"하단", "하락", "골든크로스", "급반등", "반전", "저점"}
     sell_keywords = {"상단", "상승", "데드크로스", "급락", "고점"}
 
     def contains_keywords(msg, keywords):
         if not msg:
             return False
-        msg_lower = msg.lower()
-        return any(kw in msg_lower for kw in keywords)
+        return any(kw in msg for kw in keywords)
 
-    is_buy = all(contains_keywords(v, buy_keywords) for v in active_signals.values())
-    is_sell = all(contains_keywords(v, sell_keywords) for v in active_signals.values())
+    buy_score = sum(contains_keywords(v, buy_keywords) for v in active_signals.values())
+    sell_score = sum(contains_keywords(v, sell_keywords) for v in active_signals.values())
 
-    if is_buy:
+    # 방향성 판별
+    if buy_score > 0 and sell_score == 0:
         action_type = "buy"
         action_line = "🟢 *매수 진입 타이밍으로 판단됩니다.*"
-    elif is_sell:
+    elif sell_score > 0 and buy_score == 0:
         action_type = "sell"
         action_line = "🔴 *매도 고려 타이밍으로 판단됩니다.*"
-    else:
+    elif buy_score > 0 and sell_score > 0:
         action_type = "conflict"
-        action_line = "⚠️ *전략 간 방향성이 상충됩니다. 추가 확인이 필요합니다.*"
+        action_line = (
+            "⚠️ *전략 간 방향성이 상충됩니다.*\n"
+            "💡 서로 다른 시그널이 동시에 감지되어, 섣부른 진입보다는 관망이 권장됩니다."
+        )
+    else:
+        action_type = "neutral"
+        action_line = "ℹ️ *명확한 방향성이 없습니다. 관망을 권장합니다.*"
 
-    # 점수 시각화 바 추가
-    score_bar = get_score_bar(total_score, signal_type=action_type)
+    # 점수 시각화 바
+    score_bar = get_score_bar(
+        score=total_score,
+        signal_type=action_type,
+        max_score=100,
+        bar_length=20
+    )
 
     # 전체 메시지 조합
     full_message = (
@@ -255,7 +266,7 @@ def analyze_combo(b_msg, j_msg, c_msg):
     }
 
 # 점수 시각화 바 생성
-def get_score_bar(score, signal_type="neutral", max_score=100, bar_length=20):
+def get_score_bar(score, signal_type="neutral", max_score=100, bar_length=10):
     """
     텔레그램 메시지용 색상 이모지 기반 시각화 바 + 신호 방향 텍스트 포함
     """
