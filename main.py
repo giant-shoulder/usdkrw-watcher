@@ -293,9 +293,15 @@ def get_score_bar(score, signal_type="neutral", max_score=100, bar_length=10):
     return f"{direction_label}\n{bar_body} {score}점"
 
 # 연속 상단/하단 돌파 + 크로스/급변 조건에 따른 종합 판단
-def analyze_streak_logic(upper_streak, lower_streak, cross_signal, jump_signal):
+def analyze_streak_logic(
+    upper_streak, lower_streak,
+    cross_signal, jump_signal,
+    prev_upper_streak_alert_level,
+    prev_lower_streak_alert_level
+):
     """
     연속 상단/하단 돌파 + 크로스/급변 조건에 따른 종합 판단
+    - 각 반복 조건별로 1회만 알림 발송
     """
 
     is_golden = cross_signal and "골든크로스" in cross_signal
@@ -303,92 +309,104 @@ def analyze_streak_logic(upper_streak, lower_streak, cross_signal, jump_signal):
     is_crash = jump_signal and "급하락" in jump_signal
     is_surge = jump_signal and "급상승" in jump_signal
 
-    # ✅ 1. 상단 돌파 + 골든크로스
+    # ✅ 상단 돌파 + 골든크로스
     if upper_streak >= 3 and is_golden:
-        return (
+        return 0, 0, (
             "🔥 *강력한 매수 신호!* 최근 3회 이상 연속 상단 돌파와\n"
             "골든크로스가 함께 감지되었습니다.\n"
             "💡 *상승 추세 진입 가능성이 높습니다.*"
         )
 
-    # ✅ 2. 상단 돌파 반복 단계별 대응 (추격매수 주의)
+    # ✅ 상단 돌파 단계별
     if upper_streak >= 7 and not is_golden and not is_crash:
-        return (
-            "🚨 *상단 과열 경고!* 상단 돌파가 7회 이상 반복 중입니다.\n"
-            "📈 단기 고점 가능성이 높으며 급락 위험에 주의가 필요합니다.\n"
-            "💡 *익절 및 리스크 점검을 권장합니다.*"
-        )
+        if prev_upper_streak_alert_level < 3:
+            return 3, prev_lower_streak_alert_level, (
+                "🚨 *상단 과열 경고!* 상단 돌파가 7회 이상 반복 중입니다.\n"
+                "📈 단기 고점 가능성이 높으며 급락 위험에 주의가 필요합니다.\n"
+                "💡 *익절 및 리스크 점검을 권장합니다.*"
+            )
     elif upper_streak >= 5 and not is_golden and not is_crash:
-        return (
-            "⚠️ *과열 조짐:* 상단 돌파가 5회 이상 반복 중입니다.\n"
-            "📈 추세가 이어질 수 있지만 과매수 구간일 수 있습니다.\n"
-            "💡 *보수적 대응을 추천합니다.*"
-        )
+        if prev_upper_streak_alert_level < 2:
+            return 2, prev_lower_streak_alert_level, (
+                "⚠️ *과열 조짐:* 상단 돌파가 5회 이상 반복 중입니다.\n"
+                "📈 추세가 이어질 수 있지만 과매수 구간일 수 있습니다.\n"
+                "💡 *보수적 대응을 추천합니다.*"
+            )
     elif upper_streak >= 3 and not is_golden and not is_crash:
-        return (
-            "👀 *관망 신호:* 연속 상단 돌파가 감지되었지만\n"
-            "추가 상승의 명확한 근거는 부족합니다.\n"
-            "⚠️ *추격 매수는 신중히 판단하세요.*"
-        )
+        if prev_upper_streak_alert_level < 1:
+            return 1, prev_lower_streak_alert_level, (
+                "👀 *관망 신호:* 연속 상단 돌파가 감지되었지만\n"
+                "추가 상승의 명확한 근거는 부족합니다.\n"
+                "⚠️ *추격 매수는 신중히 판단하세요.*"
+            )
 
-    # ✅ 3. 상단 돌파 중 급하락
+    # ✅ 상단 돌파 중 급하락
     if upper_streak >= 2 and is_crash:
-        return (
+        return 0, 0, (
             "⚠️ *가짜 돌파 주의!* 상단 돌파 이후 급하락이 감지되었습니다.\n"
             "📉 고점 반전 가능성에 유의하세요."
         )
 
-    # ✅ 4. 하단 이탈 + 데드크로스
+    # ✅ 하단 이탈 + 데드크로스
     if lower_streak >= 3 and is_dead:
-        return (
+        return 0, 0, (
             "🔻 *하락 경고 신호:* 최근 3회 이상 연속 하단 이탈과 함께\n"
             "데드크로스가 감지되었습니다.\n"
             "💡 *추세적 하락 가능성에 유의하세요.*"
         )
 
-    # ✅ 5. 하단 이탈 반복 단계별 대응
+    # ✅ 하단 이탈 단계별
     if lower_streak >= 7 and not is_dead and not is_surge:
-        return (
-            "🚨 *강력한 하락 경고!* 하단 이탈이 7회 이상 반복되고 있습니다.\n"
-            "📉 단기 하락 확증 가능성이 높으며 손절 기준 점검이 필요합니다.\n"
-            "💡 *추가 손실 방지에 대비하세요.*"
-        )
+        if prev_lower_streak_alert_level < 3:
+            return prev_upper_streak_alert_level, 3, (
+                "🚨 *강력한 하락 경고!* 하단 이탈이 7회 이상 반복되고 있습니다.\n"
+                "📉 단기 하락 확증 가능성이 높으며 손절 기준 점검이 필요합니다.\n"
+                "💡 *추가 손실 방지에 대비하세요.*"
+            )
     elif lower_streak >= 5 and not is_dead and not is_surge:
-        return (
-            "⚠️ *지속적 하락 조짐:* 하단 이탈이 5회 이상 반복되고 있습니다.\n"
-            "📉 반등 징후 없이 하락세 지속 시 주의가 필요합니다.\n"
-            "💡 *진입 자제 및 보수적 대응 권장.*"
-        )
+        if prev_lower_streak_alert_level < 2:
+            return prev_upper_streak_alert_level, 2, (
+                "⚠️ *지속적 하락 조짐:* 하단 이탈이 5회 이상 반복되고 있습니다.\n"
+                "📉 반등 징후 없이 하락세 지속 시 주의가 필요합니다.\n"
+                "💡 *진입 자제 및 보수적 대응 권장.*"
+            )
     elif lower_streak >= 3 and not is_dead and not is_surge:
-        return (
-            "🧊 *하단 이탈 반복 감지됨.*\n"
-            "아직 명확한 추가 하락 근거는 없지만 주의가 필요합니다.\n"
-            "⚠️ 저점 확인 전까지 관망을 추천합니다."
-        )
+        if prev_lower_streak_alert_level < 1:
+            return prev_upper_streak_alert_level, 1, (
+                "🧊 *하단 이탈 반복 감지됨.*\n"
+                "아직 명확한 추가 하락 근거는 없지만 주의가 필요합니다.\n"
+                "⚠️ 저점 확인 전까지 관망을 추천합니다."
+            )
 
-    # ✅ 6. 하단 이탈 + 급반등
+    # ✅ 하단 이탈 + 급반등
     if lower_streak >= 2 and is_surge and not is_golden:
-        return (
+        return 0, 0, (
             "📈 *급반등 주의:* 하단 이탈 중 갑작스러운 급상승이 감지되었습니다.\n"
             "💡 일시적 반등일 수 있으며 확인이 필요합니다."
         )
 
-    # ✅ 7. 하단 이탈 → 급반등 → 골든크로스
+    # ✅ 하단 이탈 → 급반등 → 골든크로스
     if lower_streak >= 2 and is_surge and is_golden:
-        return (
+        return 0, 0, (
             "🟢 *바닥 반등 + 골든크로스 감지!*\n"
             "📈 하단 이탈 이후 급반등과 골든크로스가 동시에 나타났습니다.\n"
             "💡 *단기 저점 탈출 및 반전 가능성이 있습니다.*"
         )
 
-    # ✅ 8. 상단 돌파 + 골든크로스 이후 급하락
+    # ✅ 상단 돌파 + 골든크로스 이후 급하락
     if upper_streak >= 2 and is_golden and is_crash:
-        return (
+        return 0, 0, (
             "⚠️ *과열 후 급락 조짐:* 상단 돌파 + 골든크로스 이후 급하락 발생.\n"
             "📉 고점 반전 가능성. 단기 리스크 확대에 주의하세요."
         )
 
-    return None
+    # 반복 해제 시 알림 단계 초기화
+    if upper_streak < 3:
+        prev_upper_streak_alert_level = 0
+    if lower_streak < 3:
+        prev_lower_streak_alert_level = 0
+
+    return prev_upper_streak_alert_level, prev_lower_streak_alert_level, None
 
 # 주말 확인 함수
 def is_weekend():
@@ -415,10 +433,13 @@ async def main():
     )
 
     conn = await connect_to_db()
-    prev_rate = None
-    prev_short_avg, prev_long_avg = None, None
+    # streak 카운터 및 알림 단계 초기화
     upper_streak = 0
     lower_streak = 0
+    upper_streak_alert_level = 0
+    lower_streak_alert_level = 0
+    prev_rate = None
+    prev_short_avg, prev_long_avg = None, None
 
     while True:
         if is_weekend():
@@ -431,16 +452,17 @@ async def main():
             print(f"📈 API 조회된 환율: {rate}")
         else:
             print("❌ 환율 조회 실패 (None 반환됨)")
-        
+
         if rate:
             await store_rate(conn, rate)
             rates = await get_recent_rates(conn, LONG_TERM_PERIOD)
 
+            # 개별 전략 분석
             b_status, b_message = analyze_bollinger(rates, rate)
             j_msg = analyze_jump(prev_rate, rate)
             c_msg, prev_short_avg, prev_long_avg = analyze_cross(rates, prev_short_avg, prev_long_avg)
 
-            # streak 관리
+            # 연속 상하단 돌파 streak 카운트
             if b_status == "upper_breakout":
                 upper_streak += 1
                 lower_streak = 0
@@ -458,20 +480,27 @@ async def main():
 
             # 복합 전략 분석
             combo_result = analyze_combo(b_message, j_msg, c_msg)
-            streak_msg = analyze_streak_logic(
-                upper_streak, lower_streak,
+
+            # 연속 돌파 전략 분석 (중복 방지 포함)
+            up_level, low_level, streak_msg = analyze_streak_logic(
+                upper_streak,
+                lower_streak,
                 cross_signal=c_msg,
-                jump_signal=j_msg
+                jump_signal=j_msg,
+                prev_upper_streak_alert_level=upper_streak_alert_level,
+                prev_lower_streak_alert_level=lower_streak_alert_level
             )
 
+            upper_streak_alert_level = up_level
+            lower_streak_alert_level = low_level
+
+            # ✅ 알림 우선순위 처리
             if combo_result:
-                # combo 메시지가 우선, streak는 참고로 추가
                 message = combo_result["message"]
                 if streak_msg and combo_result["type"] != "conflict":
                     message += f"\n\n🧭 *추가 참고:* (연속 돌파 시나리오)\n{streak_msg}"
                 await send_telegram(message)
             else:
-                # combo가 없을 경우 streak 단독 알림
                 if streak_msg:
                     await send_telegram(streak_msg)
 
