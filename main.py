@@ -107,7 +107,7 @@ async def send_telegram(message):
             print(f"❌ 전송 실패 ({cid}):", e)
 
 # 볼린저 밴드 분석
-def analyze_bollinger(rates, current):
+def analyze_bollinger(rates, current, prev=None):
     if len(rates) < MOVING_AVERAGE_PERIOD:
         return None, None
     avg = mean(rates)
@@ -115,12 +115,32 @@ def analyze_bollinger(rates, current):
     upper = avg + 2 * std
     lower = avg - 2 * std
 
+    diff_section = ""
+    arrow = ""
+    if prev is not None:
+        diff = round(current - prev, 2)
+        arrow = "▲" if diff > 0 else "▼" if diff < 0 else "→"
+        direction = "상승 중" if diff > 0 else "하락 중" if diff < 0 else "변화 없음"
+        diff_section = (
+            f"\n\n{'🔺' if diff > 0 else '🔻' if diff < 0 else 'ℹ️'} *이전 관측값 대비 {direction}*\n"
+            f"이전: {prev:.2f} → 현재: {current:.2f}\n"
+            f"변동: {diff:+.2f}원"
+        )
+
     if current > upper:
         status = "upper_breakout"
-        message = f"📈 볼린저 밴드 상단 돌파!\n이동평균: {avg:.2f}\n현재: {current:.2f}\n상단: {upper:.2f}"
+        message = (
+            f"📈 볼린저 밴드 상단 돌파!\n"
+            f"이동평균: {avg:.2f}\n현재: {current:.2f} {arrow}\n상단: {upper:.2f}"
+            f"{diff_section}"
+        )
     elif current < lower:
         status = "lower_breakout"
-        message = f"📉 볼린저 밴드 하단 이탈!\n이동평균: {avg:.2f}\n현재: {current:.2f}\n하단: {lower:.2f}"
+        message = (
+            f"📉 볼린저 밴드 하단 이탈!\n"
+            f"이동평균: {avg:.2f}\n현재: {current:.2f} {arrow}\n하단: {lower:.2f}"
+            f"{diff_section}"
+        )
     else:
         status, message = None, None
 
@@ -319,9 +339,12 @@ def analyze_streak_logic(
 
     # ✅ 상단 돌파 단계별
     if upper_streak >= 7 and not is_golden and not is_crash:
-        if prev_upper_streak_alert_level < 3:
-            return 3, prev_lower_streak_alert_level, (
-                "🚨 *상단 과열 경고!* 상단 돌파가 7회 이상 반복 중입니다.\n"
+        key_alert_levels = [7, 11, 15, 19]
+        next_level = 3  # 강력 과열 경고 레벨
+
+        if upper_streak in key_alert_levels and prev_upper_streak_alert_level < next_level:
+            return next_level, prev_lower_streak_alert_level, (
+                f"🚨 *상단 과열 경고!* 상단 돌파가 *{upper_streak}회* 반복 중입니다.\n"
                 "📈 단기 고점 가능성이 높으며 급락 위험에 주의가 필요합니다.\n"
                 "💡 *익절 및 리스크 점검을 권장합니다.*"
             )
@@ -357,9 +380,12 @@ def analyze_streak_logic(
 
     # ✅ 하단 이탈 단계별
     if lower_streak >= 7 and not is_dead and not is_surge:
-        if prev_lower_streak_alert_level < 3:
-            return prev_upper_streak_alert_level, 3, (
-                "🚨 *강력한 하락 경고!* 하단 이탈이 7회 이상 반복되고 있습니다.\n"
+        key_alert_levels = [7, 11, 15, 19]
+        next_level = 3  # 강력 경고 레벨
+
+        if lower_streak in key_alert_levels and prev_lower_streak_alert_level < next_level:
+            return prev_upper_streak_alert_level, next_level, (
+                f"🚨 *강력한 하락 경고!* 하단 이탈이 *{lower_streak}회* 반복되고 있습니다.\n"
                 "📉 단기 하락 확증 가능성이 높으며 손절 기준 점검이 필요합니다.\n"
                 "💡 *추가 손실 방지에 대비하세요.*"
             )
