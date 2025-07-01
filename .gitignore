@@ -1,3 +1,6 @@
 .env
-usdkrw_rates.db
-main_backup_*.py
+# Ignore Python cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
