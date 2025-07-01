@@ -1,6 +1,7 @@
 import asyncio
 from datetime import datetime
 from config import CHECK_INTERVAL, LONG_TERM_PERIOD
+from strategies.utils.streak import get_streak_advisory
 from utils import is_weekend
 from db import connect_to_db, close_db_connection, store_rate, get_recent_rates
 from fetcher import get_usdkrw_rate
@@ -58,6 +59,20 @@ async def run_watcher():
                 for msg in [b_msg, j_msg, c_msg]:
                     if msg:
                         await send_telegram(msg)
+
+                # streak 기반 추가 경고 판단 (✅ 복합 조건 없어도 수행됨)
+                new_upper_level, new_lower_level, streak_msg = get_streak_advisory(
+                    upper_streak, lower_streak,
+                    cross_msg=c_msg,
+                    jump_msg=j_msg,
+                    prev_upper=prev_upper_level,
+                    prev_lower=prev_lower_level
+                )
+
+                if streak_msg:
+                    await send_telegram(f"🧭 *동일 신호 반복 알림:*\n{streak_msg}")
+                    prev_upper_level = new_upper_level
+                    prev_lower_level = new_lower_level
 
                 # 복합 전략 분석 및 메시지 전송
                 result = analyze_combo(
