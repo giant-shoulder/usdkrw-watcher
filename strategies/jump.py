@@ -14,7 +14,7 @@ def analyze_jump(prev, current):
 
     if abs(diff) >= JUMP_THRESHOLD:
         direction = "급상승" if diff > 0 else "급하락"
-        symbol = "🔺📈" if diff > 0 else "🔻📉"
+        symbol = "🔺📈" if diff > 0 else "🔵📉"
         return (
             f"{symbol} *단기 {direction}!* \n"
             f"현재: {current:.2f}\n"

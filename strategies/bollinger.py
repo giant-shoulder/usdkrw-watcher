@@ -22,7 +22,7 @@ def analyze_bollinger(rates: list[float], current: float, prev: float = None):
         arrow = "▲" if diff > 0 else "▼" if diff < 0 else "→"
         direction = "상승 중" if diff > 0 else "하락 중" if diff < 0 else "변화 없음"
         diff_section = (
-            f"\n\n{'🔺' if diff > 0 else '🔻' if diff < 0 else 'ℹ️'} *이전 관측값 대비 {direction}*\n"
+            f"\n\n{'🔺' if diff > 0 else '🔵' if diff < 0 else 'ℹ️'} *이전 관측값 대비 {direction}*\n"
             f"이전: {prev:.2f} → 현재: {current:.2f}\n"
             f"변동: {diff:+.2f}원"
         )
