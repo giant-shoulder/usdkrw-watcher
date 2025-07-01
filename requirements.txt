@@ -1,5 +1,15 @@
-python-telegram-bot==20.8
-requests
-pytz
-python-dotenv
-asyncpg
+# 필수 비동기/DB 라이브러리
+asyncpg==0.30.0
+python-dotenv==1.1.1
+
+# 텔레그램 봇 전송용
+python-telegram-bot==22.2
+
+# HTTP 요청용
+requests==2.32.3
+
+# 날짜/시간
+pytz==2025.2
+
+# 선택: 개발 중 사용 가능 (예: 타입 지원)
+typing_extensions==4.13.2
