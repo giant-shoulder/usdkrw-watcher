@@ -2,15 +2,19 @@ import asyncio
 from datetime import datetime
 from config import CHECK_INTERVAL, LONG_TERM_PERIOD
 from strategies.utils.streak import get_streak_advisory
-from utils import is_weekend
-from db import connect_to_db, close_db_connection, store_rate, get_recent_rates
-from fetcher import get_usdkrw_rate
+from utils import is_weekend, now_kst, is_scrape_time
+from fetcher import get_usdkrw_rate, fetch_expected_range
+from db import (
+    connect_to_db, close_db_connection,
+    store_rate, get_recent_rates, store_expected_range, get_today_expected_range
+)
 from notifier import send_telegram, send_start_message
 from strategies import (
     analyze_bollinger,
     analyze_jump,
     analyze_crossover,
-    analyze_combo
+    analyze_combo,
+    analyze_expected_range
 )
 
 async def run_watcher():
@@ -23,19 +27,48 @@ async def run_watcher():
     lower_streak = 0
     prev_upper_level = 0
     prev_lower_level = 0
+    # 스크랩 시간 중복 실행 방지를 위한 상태 변수
+    last_scraped_date = None
+
 
     try:
         while True:
+            now = now_kst()
             if is_weekend():
-                print(f"[{datetime.now()}] ⏸️ 주말, 알림 일시 정지 중...")
+                print(f"[{now}] ⏸️ 주말, 알림 일시 정지 중...")
                 await asyncio.sleep(CHECK_INTERVAL)
                 continue
 
+            # ✅ 오전 11시대 스크랩 조건 확인
+            if is_scrape_time(last_scraped_date):
+                try:
+                    # 예상 환율 레인지 스크래핑 및 저장
+                    result = await store_expected_range(conn)
+
+                    # 텔레그램 알림 메시지 구성 및 발송
+                    msg = (
+                        "📊 *오늘의 예상 환율 레인지*\n"
+                        f"• 하단: *{result['low']:.2f}원*\n"
+                        f"• 상단: *{result['high']:.2f}원*\n"
+                        f"출처: {result['source']}"
+                    )
+                    await send_telegram(msg)
+
+                    last_scraped_date = now.date()
+                except Exception as e:
+                    await send_telegram(f"⚠️ 예상 환율 레인지 스크래핑 실패: {e}")
+
             rate = get_usdkrw_rate()
             if rate:
-                print(f"[{datetime.now()}] 📈 환율: {rate}")
+                print(f"[{now}] 📈 환율: {rate}")
                 await store_rate(conn, rate)
                 rates = await get_recent_rates(conn, LONG_TERM_PERIOD)
+
+                # 예상 범위 벗어남 감지
+                expected_range = await get_today_expected_range(conn)
+                e_msg = analyze_expected_range(rate, expected_range)
+                if e_msg:
+                    await send_telegram(e_msg)
 
                 # 전략별 분석
                 b_status, b_msg = analyze_bollinger(rates, rate, prev=prev_rate)
