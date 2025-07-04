@@ -9,8 +9,10 @@ from utils import is_sleep_time
 bot = Bot(token=TELEGRAM_TOKEN)
 
 async def send_start_message():
+    if is_sleep_time():
+        return
     msg = (
-        "👋 *USD/KRW 환율 모니터링을 시작합니다!*\n\n"
+        "👋 *USD/KRW 환율 모니터링을 재시작합니다!*\n\n"
         "📡 *다음과 같은 환율 변동 상황이 감지되면 실시간으로 알려드릴게요:*\n\n"
         "📊 *알림 조건*\n"
         "• 📈 환율이 *급격히 상승*할 때\n"
