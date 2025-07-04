@@ -34,10 +34,10 @@ async def run_watcher():
     try:
         while True:
             now = now_kst()
-            # if is_weekend():
-            #     print(f"[{now}] ⏸️ 주말, 알림 일시 정지 중...")
-            #     await asyncio.sleep(CHECK_INTERVAL)
-            #     continue
+            if is_weekend():
+                print(f"[{now}] ⏸️ 주말, 알림 일시 정지 중...")
+                await asyncio.sleep(CHECK_INTERVAL)
+                continue
 
             # ✅ 오전 11시대 스크랩 조건 확인
             if is_scrape_time(last_scraped_date):
