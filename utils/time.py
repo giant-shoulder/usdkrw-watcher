@@ -12,9 +12,20 @@ def is_weekend() -> bool:
     return now_kst().weekday() >= 5
 
 def is_sleep_time() -> bool:
-    """매일 오전 2시 ~ 7시 사이면 True 반환"""
+    """
+    평일 및 월요일 0시~7시 사이에는 True 반환
+    - 평일 새벽 2~7시
+    - 월요일 0~7시 (전일이 일요일)
+    """
     now = now_kst()
-    return time(2, 0) <= now.time() < time(7, 0)
+    hour = now.hour
+    weekday = now.weekday()  # 월:0 ~ 일:6
+
+    if weekday == 0 and hour < 7:
+        return True  # 월요일 0~7시
+    if 2 <= hour < 7:
+        return True  # 평일 2~7시
+    return False
 
 def is_market_open() -> bool:
     """서울 외환시장 운영 시간 (09:00 ~ 15:30) 내인지 확인"""
