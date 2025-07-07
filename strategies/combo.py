@@ -1,4 +1,4 @@
-from strategies.utils.signal_utils import get_signal_score, get_signal_direction
+from strategies.utils.signal_utils import get_signal_score, get_signal_direction, generate_combo_header
 from strategies.utils.streak import get_streak_advisory
 from strategies.utils.score_bar import get_score_bar
 
@@ -36,10 +36,11 @@ def analyze_combo(
     direction = get_signal_direction(active_signals.values())
 
     # 헤더 및 액션 메시지
-    header = (
-        "🔥 *[매우 강한 진입 신호]*\n💡 다수 전략이 일치하며 시장 움직임이 뚜렷합니다." if score >= 90 else
-        "🧭 *[진입 고려 단계]*\n📌 일부 전략이 일치하여 흐름을 주시할 구간입니다." if score >= 70 else
-        "⚠️ *[불확실한 신호 감지]*\n⏳ 전략 간 일치 부족으로 진입은 신중히 판단하세요."
+    header = generate_combo_header(
+        score=score,
+        matched=len(active_signals),
+        total=len(signals),
+        direction=direction
     )
     action = {
         "buy": (

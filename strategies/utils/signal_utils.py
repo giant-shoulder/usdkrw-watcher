@@ -40,3 +40,28 @@ def get_signal_score(active_signals: dict[str, str]) -> int:
         weight = SIGNAL_WEIGHTS.get(signal_name, 0)
         score += weight
     return min(score, 100)
+
+def generate_combo_header(score: int, matched: int, total: int, direction: str) -> str:
+    """
+    종합 전략 점수 및 일치 전략 수 기반 헤더 생성
+
+    Args:
+        score (int): 신호 점수 (0~100)
+        matched (int): 활성화된 전략 수
+        total (int): 전체 전략 수
+        direction (str): 방향성 ('buy', 'sell', 'conflict', 'neutral')
+
+    Returns:
+        str: 헤더 메시지
+    """
+    ratio = matched / total if total else 0
+    dir_emoji = "🟢 매수" if direction == "buy" else "🔴 매도" if direction == "sell" else "⚖️ 중립"
+
+    if score >= 90 and ratio >= 0.75:
+        return f"🔥 *[강력한 {dir_emoji} 신호 감지]*\n💡 다수 전략이 일치하며 시장 움직임이 뚜렷합니다."
+    elif score >= 70 and ratio >= 0.5:
+        return f"🧭 *[진입 고려 단계 — {dir_emoji} 시사]*\n📌 일부 전략이 일치하여 흐름을 주시할 구간입니다."
+    elif score >= 40:
+        return f"⚠️ *[불확실한 신호 감지]*\n⏳ 전략 간 일치 부족으로 진입은 신중히 판단하세요."
+    else:
+        return f"🚫 *[진입 신호 부족 — 전략 해석 미약]*\n📉 {dir_emoji}로 해석할 근거가 부족합니다."
