@@ -51,7 +51,7 @@ def is_scrape_time(last_scraped: datetime | None = None) -> bool:
     now = now_kst()
     if now.weekday() >= 5:  # 주말 제외
         return False
-    if 11 <= now.hour < 12:
+    if 11 <= now.hour < 13:
         if last_scraped is None or last_scraped.date() != now.date():
             return True
     return False
