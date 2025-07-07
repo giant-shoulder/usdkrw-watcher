@@ -40,23 +40,23 @@ async def run_watcher():
                 continue
 
             # ✅ 오전 11시대 스크랩 조건 확인
-            if is_scrape_time(last_scraped_date):
-                try:
-                    # 예상 환율 레인지 스크래핑 및 저장
-                    result = await store_expected_range(conn)
+            # if is_scrape_time(last_scraped_date):
+            #     try:
+            #         # 예상 환율 레인지 스크래핑 및 저장
+            #         result = await store_expected_range(conn)
 
-                    # 텔레그램 알림 메시지 구성 및 발송
-                    msg = (
-                        "📊 *오늘의 예상 환율 레인지*\n"
-                        f"• 하단: *{result['low']:.2f}원*\n"
-                        f"• 상단: *{result['high']:.2f}원*\n"
-                        f"출처: {result['source']}"
-                    )
-                    await send_telegram(msg)
+            #         # 텔레그램 알림 메시지 구성 및 발송
+            #         msg = (
+            #             "📊 *오늘의 예상 환율 레인지*\n"
+            #             f"• 하단: *{result['low']:.2f}원*\n"
+            #             f"• 상단: *{result['high']:.2f}원*\n"
+            #             f"출처: {result['source']}"
+            #         )
+            #         await send_telegram(msg)
 
-                    last_scraped_date = now.date()
-                except Exception as e:
-                    await send_telegram(f"⚠️ 예상 환율 레인지 스크래핑 실패: {e}")
+            #         last_scraped_date = now.date()
+            #     except Exception as e:
+            #         await send_telegram(f"⚠️ 예상 환율 레인지 스크래핑 실패: {e}")
 
             rate = get_usdkrw_rate()
             if rate:
