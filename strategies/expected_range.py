@@ -21,7 +21,6 @@ def analyze_expected_range(rate: float, expected: dict, now: datetime) -> str | 
 
     low, high = expected["low"], expected["high"]
 
-    # 쿨다운 체크
     def in_cooldown():
         return last_expected_alert_time and (now - last_expected_alert_time) < COOLDOWN
 
@@ -32,21 +31,21 @@ def analyze_expected_range(rate: float, expected: dict, now: datetime) -> str | 
             last_expected_alert_time = now
             below_start_time = now
             return (
-                f"🚨 *예상 확율 하단 이탈 감지!*"
+                f"🚨 *예상 환율 하단 이탈 감지!*\n"
                 f"예상 하단: {low:.2f}원\n"
-                f"현재 확율: {rate:.2f}원\n"
+                f"현재 환율: {rate:.2f}원\n"
                 "📉 시장이 예측보다 더 약세를 보이고 있습니다."
             )
         elif in_cooldown():
             return None
         elif below_start_time and (now - below_start_time) > SUSTAINED_DURATION:
             last_expected_alert_time = now
-            below_start_time = None  # 리셋
+            below_start_time = None
             return (
-                "⚠️ *예상 하단 이탈 상황 30분 이상 지속 감지!*"
+                f"⚠️ *예상 환율 하단 이탈 30분 이상 지속 감지!*\n"
                 f"예상 하단: {low:.2f}원\n"
-                f"현재 확율: {rate:.2f}원\n"
-                "📉 지속적인 약세 시상을 가능성으로 고려할 수 있습니다."
+                f"현재 환율: {rate:.2f}원\n"
+                "📉 지속적인 약세 흐름이 이어지고 있습니다."
             )
         return None
 
@@ -57,10 +56,10 @@ def analyze_expected_range(rate: float, expected: dict, now: datetime) -> str | 
             last_expected_alert_time = now
             above_start_time = now
             return (
-                f"🚨 *예상 확율 상단 돌파 감지!*"
+                f"🚨 *예상 환율 상단 돌파 감지!*\n"
                 f"예상 상단: {high:.2f}원\n"
-                f"현재 확율: {rate:.2f}원\n"
-                "📈 시장이 예측보다 가여되어 상승 중입니다."
+                f"현재 환율: {rate:.2f}원\n"
+                "📈 시장이 예측보다 강세를 보이며 상승 중입니다."
             )
         elif in_cooldown():
             return None
@@ -68,14 +67,14 @@ def analyze_expected_range(rate: float, expected: dict, now: datetime) -> str | 
             last_expected_alert_time = now
             above_start_time = None
             return (
-                "⚠️ *예상 환율 상단 돌파 30분 이상 지속 감지!*"
+                f"⚠️ *예상 환율 상단 돌파 30분 이상 지속 감지!*\n"
                 f"예상 상단: {high:.2f}원\n"
                 f"현재 환율: {rate:.2f}원\n"
-                "📈 지속적인 과열 상승 시상을 고려할 수 있습니다."
+                "📈 과열된 상승 흐름이 지속되고 있습니다."
             )
         return None
 
-    # 범위 안으로 돌아온 경우
+    # 범위 내로 복귀 시 상태 초기화
     was_below_expected = False
     was_above_expected = False
     below_start_time = None
