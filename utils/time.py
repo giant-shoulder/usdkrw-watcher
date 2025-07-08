@@ -1,4 +1,4 @@
-from datetime import datetime, time
+from datetime import datetime, time, date
 import pytz
 
 TIMEZONE = pytz.timezone("Asia/Seoul")
@@ -44,14 +44,16 @@ def is_exact_time(hour: int, minute: int) -> bool:
     now = now_kst()
     return now.hour == hour and now.minute == minute
 
-def is_scrape_time(last_scraped: datetime | None = None) -> bool:
+def is_scrape_time(last_scraped: date | None = None) -> bool:
     """
     오전 11시대에 해당하며 오늘 아직 스크랩하지 않았다면 True 반환
     """
     now = now_kst()
+    today = now.date()
+
     if now.weekday() >= 5:  # 주말 제외
         return False
-    if 11 <= now.hour < 13:
-        if last_scraped is None or last_scraped.date() != now.date():
+    if 11 <= now.hour < 12:
+        if last_scraped is None or last_scraped != today:
             return True
     return False

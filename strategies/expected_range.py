@@ -1,34 +1,83 @@
-from datetime import datetime
+import asyncio
+from datetime import datetime, timedelta
 import pytz
 
-def analyze_expected_range(current_rate: float, expected: dict) -> str | None:
-    """
-    오늘의 예상 환율 범위를 벗어났는지 판단하고 메시지 반환.
-    - 벗어난 경우: 경고 메시지 반환
-    - 예상 범위 내: None
-    """
-    if not expected:
-        return None  # 예측 없음
+# ✅ 예상 환율 상태 추적 변수 (글로벌 상태로 유지)
+was_below_expected = False
+was_above_expected = False
+last_expected_alert_time = None
+below_start_time = None
+above_start_time = None
+COOLDOWN = timedelta(minutes=15)
+SUSTAINED_DURATION = timedelta(minutes=30)
 
-    today = datetime.now(pytz.timezone("Asia/Seoul")).date()
-    if expected["date"] != today:
+# ✅ 예상 범위 이탈 감지 및 쿨다운/지속 알림 추가 적용
+def analyze_expected_range(rate: float, expected: dict, now: datetime) -> str | None:
+    global was_below_expected, was_above_expected, last_expected_alert_time
+    global below_start_time, above_start_time
+
+    if not expected or expected["date"] != now.date():
         return None
 
     low, high = expected["low"], expected["high"]
 
-    if current_rate > high:
-        return (
-            f"🚨 *예상 환율 상단 돌파 감지!*\n"
-            f"예상 상단: {high:.2f}원\n"
-            f"현재 환율: {current_rate:.2f}원\n"
-            "📈 시장이 예측보다 과열되어 상승 중입니다."
-        )
-    elif current_rate < low:
-        return (
-            f"🚨 *예상 환율 하단 이탈 감지!*\n"
-            f"예상 하단: {low:.2f}원\n"
-            f"현재 환율: {current_rate:.2f}원\n"
-            "📉 시장이 예측보다 더 약세를 보이고 있습니다."
-        )
+    # 쿨다운 체크
+    def in_cooldown():
+        return last_expected_alert_time and (now - last_expected_alert_time) < COOLDOWN
 
+    # 하단 이탈
+    if rate < low:
+        if not was_below_expected:
+            was_below_expected = True
+            last_expected_alert_time = now
+            below_start_time = now
+            return (
+                f"🚨 *예상 확율 하단 이탈 감지!*"
+                f"예상 하단: {low:.2f}원\n"
+                f"현재 확율: {rate:.2f}원\n"
+                "📉 시장이 예측보다 더 약세를 보이고 있습니다."
+            )
+        elif in_cooldown():
+            return None
+        elif below_start_time and (now - below_start_time) > SUSTAINED_DURATION:
+            last_expected_alert_time = now
+            below_start_time = None  # 리셋
+            return (
+                "⚠️ *예상 하단 이탈 상황 30분 이상 지속 감지!*"
+                f"예상 하단: {low:.2f}원\n"
+                f"현재 확율: {rate:.2f}원\n"
+                "📉 지속적인 약세 시상을 가능성으로 고려할 수 있습니다."
+            )
+        return None
+
+    # 상단 돌파
+    elif rate > high:
+        if not was_above_expected:
+            was_above_expected = True
+            last_expected_alert_time = now
+            above_start_time = now
+            return (
+                f"🚨 *예상 확율 상단 돌파 감지!*"
+                f"예상 상단: {high:.2f}원\n"
+                f"현재 확율: {rate:.2f}원\n"
+                "📈 시장이 예측보다 가여되어 상승 중입니다."
+            )
+        elif in_cooldown():
+            return None
+        elif above_start_time and (now - above_start_time) > SUSTAINED_DURATION:
+            last_expected_alert_time = now
+            above_start_time = None
+            return (
+                "⚠️ *예상 환율 상단 돌파 30분 이상 지속 감지!*"
+                f"예상 상단: {high:.2f}원\n"
+                f"현재 환율: {rate:.2f}원\n"
+                "📈 지속적인 과열 상승 시상을 고려할 수 있습니다."
+            )
+        return None
+
+    # 범위 안으로 돌아온 경우
+    was_below_expected = False
+    was_above_expected = False
+    below_start_time = None
+    above_start_time = None
     return None
