@@ -66,9 +66,9 @@ async def get_bounce_probability_from_rates(conn, lower_bound: float) -> float:
         WITH lower_breaks AS (
           SELECT
             r1.timestamp AS break_time,
-            r1.value AS break_value
+            r1.rate AS break_value
           FROM rates r1
-          WHERE r1.value < $1
+          WHERE r1.rate < $1
         ),
         rebounds AS (
           SELECT
@@ -78,7 +78,7 @@ async def get_bounce_probability_from_rates(conn, lower_bound: float) -> float:
           JOIN rates r2
             ON r2.timestamp > b.break_time
            AND r2.timestamp <= b.break_time + INTERVAL '30 minutes'
-           AND r2.value >= $1
+           AND r2.rate >= $1
           GROUP BY b.break_time
         )
         SELECT
@@ -91,6 +91,7 @@ async def get_bounce_probability_from_rates(conn, lower_bound: float) -> float:
     if row and row["total_breaks"] > 0:
         return round(row["rebound_count"] / row["total_breaks"] * 100, 1)
     return 0.0
+
 
 async def get_reversal_probability_from_rates(conn, upper_bound: float) -> float:
     """
@@ -107,9 +108,9 @@ async def get_reversal_probability_from_rates(conn, upper_bound: float) -> float
         WITH upper_breaks AS (
           SELECT
             r1.timestamp AS break_time,
-            r1.value AS break_value
+            r1.rate AS break_value
           FROM rates r1
-          WHERE r1.value > $1
+          WHERE r1.rate > $1
         ),
         corrections AS (
           SELECT
@@ -119,7 +120,7 @@ async def get_reversal_probability_from_rates(conn, upper_bound: float) -> float
           JOIN rates r2
             ON r2.timestamp > b.break_time
            AND r2.timestamp <= b.break_time + INTERVAL '30 minutes'
-           AND r2.value <= $1
+           AND r2.rate <= $1
           GROUP BY b.break_time
         )
         SELECT

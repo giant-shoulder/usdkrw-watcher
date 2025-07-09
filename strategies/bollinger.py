@@ -20,14 +20,6 @@ async def analyze_bollinger(
 ) -> tuple[str | None, list[str], int, int, int, int]:
     """
     볼린저 밴드 상단/하단 분석 + 거리/반등/조정 확률 및 반복 경고 포함
-
-    Returns:
-        - status: "upper_breakout", "lower_breakout" 또는 None
-        - messages: 텔레그램 전송용 메시지 리스트
-        - upper_streak: 연속 상단 돌파 횟수
-        - lower_streak: 연속 하단 이탈 횟수
-        - new_upper_level: 반복 상단 경고 레벨
-        - new_lower_level: 반복 하단 경고 레벨
     """
     if len(rates) < MOVING_AVERAGE_PERIOD:
         return None, [], prev_upper, prev_lower, 0, 0
@@ -68,8 +60,28 @@ async def analyze_bollinger(
         upper_streak = prev_upper + 1
         lower_streak = 0
         distance = round(current - upper, 2)
-        # 볼린저 밴드 상단 돌파 발생 시, 30분 이내 조정(상단 이하 복귀) 확률 계산
         reversal_prob = await get_reversal_probability_from_rates(conn, upper)
+        if reversal_prob >= 75:
+            prob_msg = (
+                f"📊 과거 유사한 상단 돌파 이후 *되돌림(하락) 비율은 약 {reversal_prob:.0f}%*입니다.\n"
+                f"→ *상승 직후 일시적인 조정 흐름이 자주 나타났던 패턴입니다.*"
+            )
+        elif reversal_prob >= 50:
+            prob_msg = (
+                f"📊 비슷한 상단 돌파 상황에서의 되돌림 확률은 *약 {reversal_prob:.0f}%*입니다.\n"
+                f"→ *과열 이후 단기 조정 가능성을 열어둘 수 있습니다.*"
+            )
+        elif reversal_prob >= 30:
+            prob_msg = (
+                f"📊 상단 돌파 후 되돌림 확률은 *약 {reversal_prob:.0f}%*입니다.\n"
+                f"→ *추세 유지와 조정이 혼재된 구간으로 보입니다.*"
+            )
+        else:
+            prob_msg = (
+                f"📊 되돌림 확률은 *약 {reversal_prob:.0f}%*로 낮은 수준입니다.\n"
+                f"→ *상승세가 그대로 이어질 가능성도 고려됩니다.*"
+            )
+
         messages.append(
             f"📈 볼린저 밴드 상단 돌파!\n"
             f"이동평균: {avg:.2f}\n현재: {current:.2f} {arrow}\n상단: {upper:.2f}\n\n"
@@ -77,7 +89,7 @@ async def analyze_bollinger(
             f"→ {'약한' if abs(distance) < 0.2 else '상당한'} 돌파로, 조정 가능성도 고려됩니다."
             f"{diff_section}\n\n"
             f"📊 과거 유사 상단 돌파 후 조정 확률은 약 {reversal_prob:.0f}%입니다.\n"
-            f"→ 통계적으로 과열 후 일시적 하락이 뒤따랐던 경우가 많습니다.\n\n"
+            f"{prob_msg}\n\n"
             f"📈 현재 밴드 폭: {band_width:.2f}원 ({volatility_label} 변동성)"
         )
 
@@ -86,8 +98,28 @@ async def analyze_bollinger(
         lower_streak = prev_lower + 1
         upper_streak = 0
         distance = round(lower - current, 2)
-        # 볼린저 밴드 하단 이탈 발생 시, 30분 이내 반등(하단 이상 복귀) 확률 계산
         bounce_prob = await get_bounce_probability_from_rates(conn, lower)
+        if bounce_prob >= 75:
+            prob_msg = (
+                f"📊 과거 유사한 하단 이탈 이후 *반등이 나타난 비율은 약 {bounce_prob:.0f}%*입니다.\n"
+                f"→ *통계적으로 반등 흐름이 강하게 나타났던 구간입니다.*"
+            )
+        elif bounce_prob >= 50:
+            prob_msg = (
+                f"📊 과거 유사 상황에서의 반등 확률은 *약 {bounce_prob:.0f}%*입니다.\n"
+                f"→ *반등 가능성을 충분히 고려할 수 있는 흐름입니다.*"
+            )
+        elif bounce_prob >= 30:
+            prob_msg = (
+                f"📊 과거 사례에서의 반등 확률은 *약 {bounce_prob:.0f}%* 수준입니다.\n"
+                f"→ *참고 가능한 수치이긴 하나, 신중한 판단이 필요합니다.*"
+            )
+        else:
+            prob_msg = (
+                f"📊 반등 확률은 *약 {bounce_prob:.0f}%*로 낮은 편입니다.\n"
+                f"→ *하락세 지속 가능성도 염두에 둘 필요가 있습니다.*"
+            )
+
         messages.append(
             f"📉 볼린저 밴드 하단 이탈!\n"
             f"이동평균: {avg:.2f}\n현재: {current:.2f} {arrow}\n하단: {lower:.2f}\n\n"
@@ -95,11 +127,10 @@ async def analyze_bollinger(
             f"→ {'약한' if abs(distance) < 0.2 else '상당한'} 이탈로, 반등 가능성도 고려됩니다."
             f"{diff_section}\n\n"
             f"📊 과거 유사 하단 이탈 후 반등 확률은 약 {bounce_prob:.0f}%입니다.\n"
-            f"→ 통계적으로 반등 시도가 우세했던 구간입니다.\n\n"
+            f"{prob_msg}\n\n"
             f"📈 현재 밴드 폭: {band_width:.2f}원 ({volatility_label} 변동성)"
         )
 
-    # 반복 경고 메시지
     u_level, l_level, streak_msg = get_streak_advisory(
         upper=upper_streak,
         lower=lower_streak,
