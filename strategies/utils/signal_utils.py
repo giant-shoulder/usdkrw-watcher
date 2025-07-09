@@ -41,27 +41,58 @@ def get_signal_score(active_signals: dict[str, str]) -> int:
         score += weight
     return min(score, 100)
 
-def generate_combo_header(score: int, matched: int, total: int, direction: str) -> str:
+def generate_combo_summary(score: int, matched: int, total: int, direction: str) -> str:
     """
-    종합 전략 점수 및 일치 전략 수 기반 헤더 생성
+    점수 및 방향성 기반 콤보 전략 헤더 생성
 
     Args:
         score (int): 신호 점수 (0~100)
         matched (int): 활성화된 전략 수
         total (int): 전체 전략 수
-        direction (str): 방향성 ('buy', 'sell', 'conflict', 'neutral')
+        direction (str): 'buy', 'sell', 'conflict', 'neutral'
 
     Returns:
-        str: 헤더 메시지
+        str: 텔레그램용 헤더 메시지
     """
     ratio = matched / total if total else 0
-    dir_emoji = "🟢 매수" if direction == "buy" else "🔴 매도" if direction == "sell" else "⚖️ 중립"
+    dir_text = {"buy": "🟢 매수", "sell": "🔴 매도", "conflict": "⚖️ 중립", "neutral": "ℹ️ 관망"}.get(direction, "❓ 미확정")
 
+    # ✅ 단일 전략일 경우는 별도 메시지 처리
+    if matched == 1:
+        if score >= 30:
+            return (
+                f"📌 *[주요 전략 기반 해석 — {dir_text} 시사]*\n"
+                f"💬 하나의 핵심 전략에서 방향성 단서가 포착되었습니다."
+            )
+        else:
+            return (
+                f"🔍 *[참고용 신호 — {dir_text} 시사]*\n"
+                f"📉 약한 신호로, 시장 흐름 참고 수준입니다."
+            )
+
+    # ✅ 2개 이상 전략이 일치하는 경우 (기존 구조 유지)
     if score >= 90 and ratio >= 0.75:
-        return f"🔥 *[강력한 {dir_emoji} 신호 감지]*\n💡 다수 전략이 일치하며 시장 움직임이 뚜렷합니다."
-    elif score >= 70 and ratio >= 0.5:
-        return f"🧭 *[진입 고려 단계 — {dir_emoji} 시사]*\n📌 일부 전략이 일치하여 흐름을 주시할 구간입니다."
+        return (
+            f"🔥 *[강력한 {dir_text} 신호 감지]*\n"
+            f"💡 다수 전략이 일치하며 시장 움직임이 뚜렷합니다."
+        )
+    elif score >= 70:
+        return (
+            f"🧭 *[진입 고려 단계 — {dir_text} 신호 감지]*\n"
+            f"📈 여러 전략에서 일치된 방향이 포착되었습니다."
+        )
     elif score >= 40:
-        return f"⚠️ *[불확실한 신호 감지]*\n⏳ 전략 간 일치 부족으로 진입은 신중히 판단하세요."
+        return (
+            f"⚠️ *[불확실한 시그널 감지]*\n"
+            f"📌 일부 전략은 {dir_text}를 시사하지만 해석은 신중히 필요합니다."
+        )
+    elif score >= 20:
+        return (
+            f"🔍 *[참고용 신호 — {dir_text} 시사]*\n"
+            f"📉 약한 신호로, 시장 흐름 참고 수준입니다."
+        )
     else:
-        return f"🚫 *[진입 신호 부족 — 전략 해석 미약]*\n📉 {dir_emoji}로 해석할 근거가 부족합니다."
+        return (
+            f"🚫 *[진입 신호 부족 — 전략 해석 미약]*\n"
+            f"{'📈 매수로' if direction == 'buy' else '📉 매도로'} 해석할 근거가 부족합니다."
+        )

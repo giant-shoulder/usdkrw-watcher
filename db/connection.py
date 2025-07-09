@@ -24,3 +24,8 @@ async def close_db_connection(conn):
     if conn:
         await conn.close()
         print("✅ DB 연결 종료")
+
+async def fetch_rows(conn, query: str):
+    async with conn.transaction():
+        rows = await conn.fetch(query)
+    return [(row["timestamp"], row["rate"]) for row in rows]

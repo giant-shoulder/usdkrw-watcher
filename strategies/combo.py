@@ -1,47 +1,53 @@
-from strategies.utils.signal_utils import get_signal_score, get_signal_direction, generate_combo_header
-from strategies.utils.streak import get_streak_advisory
-from strategies.utils.score_bar import get_score_bar
+from strategies.utils import (
+    get_score_bar,
+    get_signal_score,
+    get_signal_direction,
+    generate_combo_summary,
+    get_streak_advisory
+)
 
 def analyze_combo(
     b_status: str,
     b_msg: str,
     j_msg: str,
     c_msg: str,
-    e_msg: str,  # ✅ 예상범위 메시지
+    e_msg: str,
     upper_streak: int,
     lower_streak: int,
     prev_upper_level: int,
     prev_lower_level: int
 ):
     """
-    활성화된 전략 메시지를 기반으로:
-    - 전략 간 공통 해석
-    - 종합 점수 산정
-    - 방향성 판단 (매수/매도/충돌/무신호)
-    - 반복 돌파 기반 추가 경고
-    를 통합적으로 수행해 메시지로 반환합니다.
+    활성화된 전략 메시지를 기반으로 종합 분석 수행:
+    - 전략 점수 계산
+    - 방향성 판단
+    - 헤더/액션/점수바/반복 경고 통합
+    - 단일 전략이라도 충분한 점수일 경우 combo 스타일 사용
     """
 
     signals = {
         "📊 볼린저 밴드": b_msg,
         "⚡ 급변 감지": j_msg,
         "🔁 이동평균선 크로스": c_msg,
-        "📡 예상 환율 레인지 이탈": e_msg
+        "📡 예상 범위 이탈": e_msg,
     }
     active_signals = {k: v for k, v in signals.items() if v}
-    if len(active_signals) < 2:
-        return None
 
+    # 점수 계산
     score = get_signal_score(active_signals)
     direction = get_signal_direction(active_signals.values())
 
-    # 헤더 및 액션 메시지
-    header = generate_combo_header(
-        score=score,
-        matched=len(active_signals),
-        total=len(signals),
-        direction=direction
+    # 콤보 적용 조건: ① 전략 수 ≥ 2 ② 단일 전략 점수 ≥ 30
+    should_apply_combo = (
+        len(active_signals) >= 2
+        or (len(active_signals) == 1 and score >= 30)
     )
+
+    if not should_apply_combo:
+        return None
+
+    # 헤더, 액션 메시지
+    header = generate_combo_summary(score=score, matched=len(active_signals), total=len(signals), direction=direction)
     action = {
         "buy": (
             "🟢 *매수 진입 타이밍으로 판단됩니다.*\n"
@@ -63,11 +69,11 @@ def analyze_combo(
         )
     }.get(direction, "해석 오류")
 
-    # 상세 전략 메시지 정리
+    # 전략별 상세 메시지 구성
     signal_details = "\n\n".join([f"{k}\n{v}" for k, v in active_signals.items()])
     score_bar = get_score_bar(score, direction)
 
-    # 연속 돌파에 대한 추가 경고 판단
+    # 반복 경고 추가
     new_upper, new_lower, streak_msg = get_streak_advisory(
         upper_streak, lower_streak,
         cross_msg=c_msg,
@@ -76,7 +82,6 @@ def analyze_combo(
         prev_lower=prev_lower_level
     )
 
-    # 메시지 조합
     message = (
         f"{header}\n\n"
         f"{signal_details}\n\n"
@@ -92,5 +97,5 @@ def analyze_combo(
         "type": direction,
         "score": score,
         "new_upper_level": new_upper,
-        "new_lower_level": new_lower
+        "new_lower_level": new_lower,
     }

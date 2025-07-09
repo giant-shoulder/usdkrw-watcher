@@ -1,5 +1,6 @@
 from datetime import datetime, time, date
 import pytz
+from config import ENVIRONMENT
 
 TIMEZONE = pytz.timezone("Asia/Seoul")
 
@@ -8,24 +9,24 @@ def now_kst() -> datetime:
     return datetime.now(TIMEZONE)
 
 def is_weekend() -> bool:
-    """토요일(5), 일요일(6)에는 True 반환"""
+    """
+    토요일(5), 일요일(6)에는 True 반환
+    단, local 환경에서는 항상 False (루프 정상 실행)
+    """
+    if ENVIRONMENT == "local":
+        return False
     return now_kst().weekday() >= 5
 
 def is_sleep_time() -> bool:
     """
-    평일 및 월요일 0시~7시 사이에는 True 반환
-    - 평일 새벽 2~7시
-    - 월요일 0~7시 (전일이 일요일)
+    운영 환경에서만 0시~7시 사이 True 반환
+    - local 환경은 항상 False (알림 발송 유지)
     """
-    now = now_kst()
-    hour = now.hour
-    weekday = now.weekday()  # 월:0 ~ 일:6
+    if ENVIRONMENT == "local":
+        return False
 
-    if weekday == 0 and hour < 7:
-        return True  # 월요일 0~7시
-    if 2 <= hour < 7:
-        return True  # 평일 2~7시
-    return False
+    hour = now_kst().hour
+    return 0 <= hour < 7  # 0시 ~ 6시까지는 True
 
 def is_market_open() -> bool:
     """서울 외환시장 운영 시간 (09:00 ~ 15:30) 내인지 확인"""
