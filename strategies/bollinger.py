@@ -8,6 +8,42 @@ from db import (
     get_reversal_probability_from_rates
 )
 
+from statistics import mean, stdev
+from config import MOVING_AVERAGE_PERIOD
+from strategies.utils.streak import get_streak_advisory
+from db import (
+    get_bounce_probability_from_rates,
+    get_reversal_probability_from_rates
+)
+
+
+def get_volatility_info(band_width: float) -> tuple[str, str]:
+    if band_width < 2:
+        return "매우 좁은 변동성 구간", "시장 움직임이 거의 없어 횡보 흐름일 가능성이 높습니다."
+    elif band_width < 3:
+        return "좁은 변동성 구간", "가격 변화가 크지 않아 신중한 접근이 필요합니다."
+    elif band_width < 5:
+        return "보통 수준의 변동성", "일반적인 변동 구간으로 해석됩니다."
+    elif band_width < 7:
+        return "상대적으로 넓은 변동성", "가격이 빠르게 움직일 수 있는 구간입니다."
+    else:
+        return "매우 넓은 변동성 구간", "시장 불확실성이 높아 급격한 변동이 우려됩니다."
+
+
+def format_prob_msg(direction: str, prob: float) -> str:
+    direction_kr = "반등" if direction == "lower" else "되돌림(하락)"
+    base_msg = f"📊 과거 3개월간 유사한 상황에서 *{direction_kr} 확률은 약 {prob:.0f}%*입니다."
+
+    if prob >= 75:
+        return f"{base_msg}\n→ *통계적으로 {direction_kr} 흐름이 강하게 나타났던 구간입니다.*"
+    elif prob >= 50:
+        return f"{base_msg}\n→ *{direction_kr} 가능성을 충분히 고려할 수 있는 흐름입니다.*"
+    elif prob >= 30:
+        return f"{base_msg}\n→ *참고 가능한 수치이긴 하나, 신중한 판단이 필요합니다.*"
+    else:
+        return f"{base_msg}\n→ *{('하락세' if direction == 'lower' else '상승세')} 지속 가능성도 염두에 둘 필요가 있습니다.*"
+
+
 async def analyze_bollinger(
     conn,
     rates: list[float],
@@ -18,9 +54,6 @@ async def analyze_bollinger(
     cross_msg: str = None,
     jump_msg: str = None
 ) -> tuple[str | None, list[str], int, int, int, int]:
-    """
-    볼린저 밴드 상단/하단 분석 + 거리/반등/조정 확률 및 반복 경고 포함
-    """
     if len(rates) < MOVING_AVERAGE_PERIOD:
         return None, [], prev_upper, prev_lower, 0, 0
 
@@ -30,13 +63,7 @@ async def analyze_bollinger(
     lower = avg - 2 * std
     band_width = upper - lower
 
-    volatility_label = (
-        "매우 좁음" if band_width < 2 else
-        "좁음" if band_width < 3 else
-        "보통" if band_width < 5 else
-        "넓음" if band_width < 7 else
-        "매우 넓음"
-    )
+    volatility_label, volatility_comment = get_volatility_info(band_width)
 
     arrow = ""
     diff_section = ""
@@ -60,76 +87,37 @@ async def analyze_bollinger(
         upper_streak = prev_upper + 1
         lower_streak = 0
         distance = round(current - upper, 2)
-        reversal_prob = await get_reversal_probability_from_rates(conn, upper)
-        if reversal_prob >= 75:
-            prob_msg = (
-                f"📊 과거 유사한 상단 돌파 이후 *되돌림(하락) 비율은 약 {reversal_prob:.0f}%*입니다.\n"
-                f"→ *상승 직후 일시적인 조정 흐름이 자주 나타났던 패턴입니다.*"
-            )
-        elif reversal_prob >= 50:
-            prob_msg = (
-                f"📊 비슷한 상단 돌파 상황에서의 되돌림 확률은 *약 {reversal_prob:.0f}%*입니다.\n"
-                f"→ *과열 이후 단기 조정 가능성을 열어둘 수 있습니다.*"
-            )
-        elif reversal_prob >= 30:
-            prob_msg = (
-                f"📊 상단 돌파 후 되돌림 확률은 *약 {reversal_prob:.0f}%*입니다.\n"
-                f"→ *추세 유지와 조정이 혼재된 구간으로 보입니다.*"
-            )
-        else:
-            prob_msg = (
-                f"📊 되돌림 확률은 *약 {reversal_prob:.0f}%*로 낮은 수준입니다.\n"
-                f"→ *상승세가 그대로 이어질 가능성도 고려됩니다.*"
-            )
-
-        messages.append(
-            f"📈 볼린저 밴드 상단 돌파!\n"
-            f"이동평균: {avg:.2f}\n현재: {current:.2f} {arrow}\n상단: {upper:.2f}\n\n"
-            f"📏 현재가가 상단보다 {abs(distance):.2f}원 위입니다.\n"
-            f"→ {'약한' if abs(distance) < 0.2 else '상당한'} 돌파로, 조정 가능성도 고려됩니다."
-            f"{diff_section}\n\n"
-            f"📊 과거 유사 상단 돌파 후 조정 확률은 약 {reversal_prob:.0f}%입니다.\n"
-            f"{prob_msg}\n\n"
-            f"📈 현재 밴드 폭: {band_width:.2f}원 ({volatility_label} 변동성)"
-        )
+        prob = await get_reversal_probability_from_rates(conn, upper)
+        prob_msg = format_prob_msg("upper", prob)
+        icon = "📈"
+        label = "상단"
 
     elif current < lower:
         status = "lower_breakout"
         lower_streak = prev_lower + 1
         upper_streak = 0
         distance = round(lower - current, 2)
-        bounce_prob = await get_bounce_probability_from_rates(conn, lower)
-        if bounce_prob >= 75:
-            prob_msg = (
-                f"📊 과거 유사한 하단 이탈 이후 *반등이 나타난 비율은 약 {bounce_prob:.0f}%*입니다.\n"
-                f"→ *통계적으로 반등 흐름이 강하게 나타났던 구간입니다.*"
-            )
-        elif bounce_prob >= 50:
-            prob_msg = (
-                f"📊 과거 유사 상황에서의 반등 확률은 *약 {bounce_prob:.0f}%*입니다.\n"
-                f"→ *반등 가능성을 충분히 고려할 수 있는 흐름입니다.*"
-            )
-        elif bounce_prob >= 30:
-            prob_msg = (
-                f"📊 과거 사례에서의 반등 확률은 *약 {bounce_prob:.0f}%* 수준입니다.\n"
-                f"→ *참고 가능한 수치이긴 하나, 신중한 판단이 필요합니다.*"
-            )
-        else:
-            prob_msg = (
-                f"📊 반등 확률은 *약 {bounce_prob:.0f}%*로 낮은 편입니다.\n"
-                f"→ *하락세 지속 가능성도 염두에 둘 필요가 있습니다.*"
-            )
+        prob = await get_bounce_probability_from_rates(conn, lower)
+        prob_msg = format_prob_msg("lower", prob)
+        icon = "📉"
+        label = "하단"
 
-        messages.append(
-            f"📉 볼린저 밴드 하단 이탈!\n"
-            f"이동평균: {avg:.2f}\n현재: {current:.2f} {arrow}\n하단: {lower:.2f}\n\n"
-            f"📏 현재가가 하단보다 {abs(distance):.2f}원 아래입니다.\n"
-            f"→ {'약한' if abs(distance) < 0.2 else '상당한'} 이탈로, 반등 가능성도 고려됩니다."
-            f"{diff_section}\n\n"
-            f"📊 과거 유사 하단 이탈 후 반등 확률은 약 {bounce_prob:.0f}%입니다.\n"
-            f"{prob_msg}\n\n"
-            f"📈 현재 밴드 폭: {band_width:.2f}원 ({volatility_label} 변동성)"
-        )
+    else:
+        return None, [], prev_upper, prev_lower, 0, 0
+
+    band_msg = (
+        f"{icon} 현재 밴드 폭은 *{band_width:.2f}원*입니다.\n"
+        f"→ {volatility_label}으로 해석되며, {volatility_comment}"
+    )
+
+    messages.append(
+        f"{icon} 볼린저 밴드 {label} {'돌파' if label == '상단' else '이탈'}!\n"
+        f"이동평균: {avg:.2f}\n현재: {current:.2f} {arrow}\n{label}: {upper if label == '상단' else lower:.2f}\n\n"
+        f"📏 현재가가 {label}보다 {abs(distance):.2f}원 {'위' if label == '상단' else '아래'}입니다."
+        f"{diff_section}\n\n"
+        f"{prob_msg}\n\n"
+        f"{band_msg}"
+    )
 
     u_level, l_level, streak_msg = get_streak_advisory(
         upper=upper_streak,

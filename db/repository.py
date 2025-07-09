@@ -69,6 +69,7 @@ async def get_bounce_probability_from_rates(conn, lower_bound: float) -> float:
             r1.rate AS break_value
           FROM rates r1
           WHERE r1.rate < $1
+            AND r1.timestamp >= NOW() - INTERVAL '90 days'
         ),
         rebounds AS (
           SELECT
@@ -111,6 +112,7 @@ async def get_reversal_probability_from_rates(conn, upper_bound: float) -> float
             r1.rate AS break_value
           FROM rates r1
           WHERE r1.rate > $1
+            AND r1.timestamp >= NOW() - INTERVAL '90 days'
         ),
         corrections AS (
           SELECT
