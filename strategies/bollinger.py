@@ -148,9 +148,7 @@ async def analyze_bollinger(
         f"이동평균: {avg:.2f}\n현재: {current:.2f} {arrow}\n{label}: {upper if label == '상단' else lower:.2f}\n\n"
         f"📏 현재가가 {label}보다 {abs(distance):.2f}원 {'위' if label == '상단' else '아래'}입니다."
         f"{diff_section}\n\n"
-        f"📊 과거 3개월간 유사한 상황에서\n"
-        f"{prob_msg}\n"
-        f"→ *{'되돌림(하락)' if label == '상단' else '반등'} 가능성을 충분히 고려할 수 있는 흐름입니다.*\n\n"
+        f"{prob_msg}\n\n"
         f"{band_msg}"
     )
 

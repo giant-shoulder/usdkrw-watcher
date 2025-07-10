@@ -18,7 +18,15 @@ from strategies import (
 )
 
 async def run_watcher():
-    await send_start_message()
+    """ 워처 메인 루프
+    - 환율 조회 및 분석
+    - 전략별 신호 분석 및 알림 전송
+    - DB 연결 및 관리
+    """
+    print(f"[{now_kst()}] 🏁 워처 시작")
+    # 초기 시작 메시지 전송
+    # 주석 처리된 부분은 필요시 활성화
+    # await send_start_message()
 
     conn = await connect_to_db()
     prev_rate = None
