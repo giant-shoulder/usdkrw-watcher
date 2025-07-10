@@ -69,16 +69,10 @@ async def run_watcher():
                     # ✅ 예상 범위 벗어남 감지
                     expected_range = await get_today_expected_range(conn)
                     e_msg = analyze_expected_range(rate, expected_range, now)
-                    if e_msg:
-                        await send_telegram(e_msg)
 
                     # ✅ 점프 / 크로스 전략
                     j_msg = analyze_jump(prev_rate, rate)
                     c_msg, prev_short_avg, prev_long_avg = analyze_crossover(rates, prev_short_avg, prev_long_avg)
-
-                    for msg in [j_msg, c_msg]:
-                        if msg:
-                            await send_telegram(msg)
 
                     # ✅ 볼린저 전략 분석 (다중 메시지 + streak 업데이트 포함)
                     b_status, b_msgs, upper_streak, lower_streak, prev_upper_level, prev_lower_level = await analyze_bollinger(
@@ -91,8 +85,10 @@ async def run_watcher():
                         cross_msg=c_msg,
                         jump_msg=j_msg
                     )
-                    for msg in b_msgs:
-                        await send_telegram(msg)
+
+                    # ✅ 개별 전략 메시지 수집
+                    single_msgs = [msg for msg in [j_msg, c_msg, e_msg] if msg]
+                    single_msgs.extend(b_msgs)
 
                     # ✅ 복합 전략 분석 및 메시지 전송
                     combo_result = analyze_combo(
@@ -106,10 +102,14 @@ async def run_watcher():
                         prev_upper_level,
                         prev_lower_level,
                     )
+
                     if combo_result:
                         prev_upper_level = combo_result["new_upper_level"]
                         prev_lower_level = combo_result["new_lower_level"]
                         await send_telegram(combo_result["message"])
+                    else:
+                        for msg in single_msgs:
+                            await send_telegram(msg)
 
                     # ✅ 이전 환율 갱신
                     prev_rate = rate

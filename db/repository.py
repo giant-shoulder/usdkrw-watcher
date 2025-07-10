@@ -51,25 +51,55 @@ async def get_today_expected_range(conn):
         }
     return None
 
-async def get_bounce_probability_from_rates(conn, lower_bound: float) -> float:
+async def get_bounce_probability_from_rates(
+    conn,
+    lower_bound: float,
+    deviation: float,
+    tolerance: float,
+    moving_average_period: int
+) -> float:
     """
-    볼린저 밴드 하단 이탈 발생 시, 30분 이내 반등(하단 이상 복귀) 확률 계산
+    볼린저 밴드 하단에서 일정 금액 이탈한 경우,
+    과거 동일한 이탈 폭 범위 조건에서 30분 내 반등 확률 계산
 
     Args:
         conn: PostgreSQL connection
-        lower_bound: 당시 기준 하단 값
+        lower_bound: 당시 하단 밴드 값
+        deviation: 하단 대비 이탈 폭 (예: 0.12)
+        tolerance: 허용 오차 범위 (예: 0.02)
+        moving_average_period: 이동 평균 계산에 사용할 기간 (데이터 포인트 수)
 
     Returns:
-        반등 확률 (0~100 사이의 소수점 포함 백분율)
+        반등 확률 (0~100 사이 소수점 포함 백분율)
     """
-    query = """
-        WITH lower_breaks AS (
+    query = f"""
+        WITH params AS (
+          SELECT $1::double precision AS lower_bound,
+                 $2::double precision AS deviation,
+                 $3::double precision AS tolerance
+        ),
+        bollinger_calc AS (
           SELECT
-            r1.timestamp AS break_time,
-            r1.rate AS break_value
-          FROM rates r1
-          WHERE r1.rate < $1
-            AND r1.timestamp >= NOW() - INTERVAL '90 days'
+            r.timestamp,
+            r.rate,
+            AVG(r.rate) OVER w AS ma,
+            STDDEV_SAMP(r.rate) OVER w AS std
+          FROM rates r
+          WINDOW w AS (
+            ORDER BY r.timestamp
+            ROWS BETWEEN {moving_average_period - 1} PRECEDING AND CURRENT ROW
+          )
+        ),
+        lower_breaks AS (
+          SELECT
+            b.timestamp AS break_time,
+            b.rate,
+            (b.ma - 2 * b.std) AS lower_band,
+            (b.ma - 2 * b.std) - b.rate AS actual_deviation
+          FROM bollinger_calc b, params p
+          WHERE b.std IS NOT NULL
+            AND (b.ma - 2 * b.std) - b.rate BETWEEN p.deviation - p.tolerance AND p.deviation + p.tolerance
+            AND b.timestamp >= NOW() - INTERVAL '90 days'
         ),
         rebounds AS (
           SELECT
@@ -79,40 +109,70 @@ async def get_bounce_probability_from_rates(conn, lower_bound: float) -> float:
           JOIN rates r2
             ON r2.timestamp > b.break_time
            AND r2.timestamp <= b.break_time + INTERVAL '30 minutes'
-           AND r2.rate >= $1
+           AND r2.rate >= b.lower_band
           GROUP BY b.break_time
         )
         SELECT
-          COUNT(*) AS total_breaks,
-          COUNT(rebound_time) AS rebound_count
+          COUNT(*) AS total_matched,
+          COUNT(r.rebound_time) AS rebound_count
         FROM lower_breaks b
         LEFT JOIN rebounds r ON b.break_time = r.break_time;
     """
-    row = await conn.fetchrow(query, lower_bound)
-    if row and row["total_breaks"] > 0:
-        return round(row["rebound_count"] / row["total_breaks"] * 100, 1)
+    row = await conn.fetchrow(query, lower_bound, deviation, tolerance)
+    if row and row["total_matched"] > 0:
+        return round(row["rebound_count"] / row["total_matched"] * 100, 1)
     return 0.0
 
 
-async def get_reversal_probability_from_rates(conn, upper_bound: float) -> float:
+async def get_reversal_probability_from_rates(
+    conn,
+    upper_bound: float,
+    deviation: float,
+    tolerance: float,
+    moving_average_period: int
+) -> float:
     """
-    볼린저 밴드 상단 돌파 발생 시, 30분 이내 조정(상단 이하 복귀) 확률 계산
+    볼린저 밴드 상단에서 일정 금액 돌파한 경우,
+    과거 동일한 초과 폭 범위 조건에서 30분 내 조정 확률 계산
 
     Args:
         conn: PostgreSQL connection
-        upper_bound: 당시 기준 상단 값
+        upper_bound: 당시 상단 밴드 값
+        deviation: 상단 대비 초과 폭 (예: 0.12)
+        tolerance: 허용 오차 범위 (예: 0.02)
+        moving_average_period: 이동 평균 계산에 사용할 기간 (데이터 포인트 수)
 
     Returns:
-        조정 확률 (0~100 사이의 소수점 포함 백분율)
+        조정 확률 (0~100 사이 소수점 포함 백분율)
     """
-    query = """
-        WITH upper_breaks AS (
+    query = f"""
+        WITH params AS (
+          SELECT $1::double precision AS upper_bound,
+                 $2::double precision AS deviation,
+                 $3::double precision AS tolerance
+        ),
+        bollinger_calc AS (
           SELECT
-            r1.timestamp AS break_time,
-            r1.rate AS break_value
-          FROM rates r1
-          WHERE r1.rate > $1
-            AND r1.timestamp >= NOW() - INTERVAL '90 days'
+            r.timestamp,
+            r.rate,
+            AVG(r.rate) OVER w AS ma,
+            STDDEV_SAMP(r.rate) OVER w AS std
+          FROM rates r
+          WINDOW w AS (
+            ORDER BY r.timestamp
+            ROWS BETWEEN {moving_average_period - 1} PRECEDING AND CURRENT ROW
+          )
+        ),
+        upper_breaks AS (
+          SELECT
+            b.timestamp AS break_time,
+            b.rate,
+            (b.ma + 2 * b.std) AS upper_band,
+            b.rate - (b.ma + 2 * b.std) AS actual_deviation
+          FROM bollinger_calc b, params p
+          WHERE b.std IS NOT NULL
+            AND b.rate - (b.ma + 2 * b.std) BETWEEN p.deviation - p.tolerance AND p.deviation + p.tolerance
+            AND b.timestamp >= NOW() - INTERVAL '90 days'
         ),
         corrections AS (
           SELECT
@@ -122,16 +182,16 @@ async def get_reversal_probability_from_rates(conn, upper_bound: float) -> float
           JOIN rates r2
             ON r2.timestamp > b.break_time
            AND r2.timestamp <= b.break_time + INTERVAL '30 minutes'
-           AND r2.rate <= $1
+           AND r2.rate <= b.upper_band
           GROUP BY b.break_time
         )
         SELECT
-          COUNT(*) AS total_breaks,
-          COUNT(correction_time) AS correction_count
+          COUNT(*) AS total_matched,
+          COUNT(r.correction_time) AS correction_count
         FROM upper_breaks b
         LEFT JOIN corrections r ON b.break_time = r.break_time;
     """
-    row = await conn.fetchrow(query, upper_bound)
-    if row and row["total_breaks"] > 0:
-        return round(row["correction_count"] / row["total_breaks"] * 100, 1)
+    row = await conn.fetchrow(query, upper_bound, deviation, tolerance)
+    if row and row["total_matched"] > 0:
+        return round(row["correction_count"] / row["total_matched"] * 100, 1)
     return 0.0

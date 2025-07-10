@@ -43,6 +43,20 @@ def format_prob_msg(direction: str, prob: float) -> str:
     else:
         return f"{base_msg}\n→ *{('하락세' if direction == 'lower' else '상승세')} 지속 가능성도 염두에 둘 필요가 있습니다.*"
 
+def auto_tolerance(deviation: float) -> float:
+    """
+    deviation 크기에 따라 적절한 tolerance 자동 결정
+    """
+    if deviation < 0.05:
+        return 0.01
+    elif deviation < 0.10:
+        return 0.02
+    elif deviation < 0.30:
+        return 0.03
+    elif deviation < 0.70:
+        return 0.05
+    else:
+        return 0.10
 
 async def analyze_bollinger(
     conn,
@@ -54,6 +68,12 @@ async def analyze_bollinger(
     cross_msg: str = None,
     jump_msg: str = None
 ) -> tuple[str | None, list[str], int, int, int, int]:
+    """
+    볼린저 밴드 분석 함수
+    - 현재 환율이 밴드 상단/하단을 돌파하거나 이탈했는지 판단
+    - 돌파/이탈 시 유사한 과거 조건에서의 반등 또는 조정 확률 계산
+    - 메시지 형태로 결과 제공
+    """
     if len(rates) < MOVING_AVERAGE_PERIOD:
         return None, [], prev_upper, prev_lower, 0, 0
 
@@ -65,6 +85,7 @@ async def analyze_bollinger(
 
     volatility_label, volatility_comment = get_volatility_info(band_width)
 
+    # 현재가 vs 이전가 비교
     arrow = ""
     diff_section = ""
     if prev is not None:
@@ -87,7 +108,12 @@ async def analyze_bollinger(
         upper_streak = prev_upper + 1
         lower_streak = 0
         distance = round(current - upper, 2)
-        prob = await get_reversal_probability_from_rates(conn, upper)
+
+        deviation = distance
+        tolerance = auto_tolerance(deviation)
+
+        # 상단 돌파 후 유사 초과폭 기준 조정 확률 계산
+        prob = await get_reversal_probability_from_rates(conn, upper, deviation, tolerance, MOVING_AVERAGE_PERIOD)
         prob_msg = format_prob_msg("upper", prob)
         icon = "📈"
         label = "상단"
@@ -97,7 +123,12 @@ async def analyze_bollinger(
         lower_streak = prev_lower + 1
         upper_streak = 0
         distance = round(lower - current, 2)
-        prob = await get_bounce_probability_from_rates(conn, lower)
+
+        deviation = distance
+        tolerance = auto_tolerance(deviation)
+
+        # 하단 이탈 후 유사 초과폭 기준 반등 확률 계산
+        prob = await get_bounce_probability_from_rates(conn, lower, deviation, tolerance, MOVING_AVERAGE_PERIOD)
         prob_msg = format_prob_msg("lower", prob)
         icon = "📉"
         label = "하단"
@@ -105,20 +136,25 @@ async def analyze_bollinger(
     else:
         return None, [], prev_upper, prev_lower, 0, 0
 
+    # 밴드 폭 메시지 구성
     band_msg = (
         f"{icon} 현재 밴드 폭은 *{band_width:.2f}원*입니다.\n"
-        f"→ {volatility_label}으로 해석되며, {volatility_comment}"
+        f"→ {volatility_label}으로, {volatility_comment}"
     )
 
+    # 종합 메시지 구성
     messages.append(
         f"{icon} 볼린저 밴드 {label} {'돌파' if label == '상단' else '이탈'}!\n"
         f"이동평균: {avg:.2f}\n현재: {current:.2f} {arrow}\n{label}: {upper if label == '상단' else lower:.2f}\n\n"
         f"📏 현재가가 {label}보다 {abs(distance):.2f}원 {'위' if label == '상단' else '아래'}입니다."
         f"{diff_section}\n\n"
-        f"{prob_msg}\n\n"
+        f"📊 과거 3개월간 유사한 상황에서\n"
+        f"{prob_msg}\n"
+        f"→ *{'되돌림(하락)' if label == '상단' else '반등'} 가능성을 충분히 고려할 수 있는 흐름입니다.*\n\n"
         f"{band_msg}"
     )
 
+    # 반복 경고 메시지 확인
     u_level, l_level, streak_msg = get_streak_advisory(
         upper=upper_streak,
         lower=lower_streak,
