@@ -32,7 +32,7 @@ def get_volatility_info(band_width: float) -> tuple[str, str]:
 
 def format_prob_msg(direction: str, prob: float) -> str:
     direction_kr = "반등" if direction == "lower" else "되돌림(하락)"
-    base_msg = f"📊 과거 3개월간 유사한 상황에서 *{direction_kr} 확률은 약 {prob:.0f}%*입니다."
+    base_msg = f"📊 과거 3개월간 유사한 상황에서 *30분 이내 {direction_kr} 확률은 약 {prob:.0f}%*입니다."
 
     if prob >= 75:
         return f"{base_msg}\n→ *통계적으로 {direction_kr} 흐름이 강하게 나타났던 구간입니다.*"
