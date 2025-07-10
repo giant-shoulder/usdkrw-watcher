@@ -5,16 +5,12 @@ from config import MOVING_AVERAGE_PERIOD
 from strategies.utils.streak import get_streak_advisory
 from db import (
     get_bounce_probability_from_rates,
-    get_reversal_probability_from_rates
+    get_reversal_probability_from_rates,
+    insert_breakout_event,
+    get_pending_breakouts,
+    mark_breakout_resolved
 )
-
-from statistics import mean, stdev
-from config import MOVING_AVERAGE_PERIOD
-from strategies.utils.streak import get_streak_advisory
-from db import (
-    get_bounce_probability_from_rates,
-    get_reversal_probability_from_rates
-)
+from utils import now_kst
 
 
 def get_volatility_info(band_width: float) -> tuple[str, str]:
@@ -57,6 +53,81 @@ def auto_tolerance(deviation: float) -> float:
         return 0.05
     else:
         return 0.10
+    
+async def check_breakout_reversals(conn, current_rate: float, current_time) -> list[str]:
+    """
+    최근 발생한 breakout 이벤트들 중 30분 이내 반등/되돌림이 실제 발생했는지 감지하여 메시지 생성
+    """
+    pending = await get_pending_breakouts(conn)
+    messages = []
+
+    for event in pending:
+        event_id = event["id"]
+        event_type = event["event_type"]
+        timestamp = event["timestamp"]
+        threshold = event["threshold"]
+        predicted_prob = event.get("predicted_probability", None)  # 선택적 필드
+        minutes_elapsed = int((current_time - timestamp).total_seconds() // 60)
+
+        if minutes_elapsed > 30:
+            continue
+
+        realized = False
+
+        if event_type == "lower_breakout" and current_rate >= threshold:
+            direction = "lower"
+            realized = True
+
+        elif event_type == "upper_breakout" and current_rate <= threshold:
+            direction = "upper"
+            realized = True
+
+        if realized:
+            msg = format_realized_breakout_message(
+                event_type=event_type,
+                threshold=threshold,
+                current=current_rate,
+                elapsed_min=minutes_elapsed,
+                predicted_prob=predicted_prob
+            )
+            messages.append(msg)
+            await mark_breakout_resolved(conn, event_id)
+
+    return messages
+
+def format_realized_breakout_message(
+    event_type: str,
+    threshold: float,
+    current: float,
+    elapsed_min: int,
+    predicted_prob: float | None = None
+) -> str:
+    """
+    실제 되돌림/반등 발생 시 사용자 알림 메시지 구성
+    """
+    is_upper = event_type == "upper_breakout"
+    icon = "📈" if is_upper else "📉"
+    title = f"{icon} *볼린저 밴드 {'상단선 돌파' if is_upper else '하단선 이탈'} 후 실제 {'되돌림(하락)' if is_upper else '반등'} 감지!*"
+
+    line1 = f"📏 {'상단 기준선' if is_upper else '하단 기준선'}: {threshold:.2f}원"
+    line2 = f"💱 현재 환율: {current:.2f}원"
+    line3 = f"⏱️ 경과 시간: {elapsed_min}분"
+
+    pred = (
+        f"*30분 내 {'상단 기준선 아래로 하락' if is_upper else '하단 기준선 위로 반등'}할 확률 {predicted_prob:.0f}%*"
+        if predicted_prob is not None else "*예측 확률 정보 없음*"
+    )
+    result = f"*{elapsed_min}분 만에 {'상단 기준선 아래로 복귀' if is_upper else '하단 기준선 위로 복귀'}*"
+
+    return (
+        f"{title}\n\n"
+        f"{line1}  \n{line2}  \n{line3}\n\n"
+        f"📊 *예측이 실제로 일치했어요!*\n\n"
+        f"• {elapsed_min}분 전 안내드렸던 전략 신호: 볼린저 밴드 {'상단선 돌파' if is_upper else '하단선 이탈'}  \n"
+        f"• 예측: {pred}  \n"
+        f"• 결과: {result}  \n\n"
+        f"📊 동일 조건에서 향후 흐름 판단에 참고해 보세요."
+    )
 
 async def analyze_bollinger(
     conn,
@@ -72,7 +143,7 @@ async def analyze_bollinger(
     볼린저 밴드 분석 함수
     - 현재 환율이 밴드 상단/하단을 돌파하거나 이탈했는지 판단
     - 돌파/이탈 시 유사한 과거 조건에서의 반등 또는 조정 확률 계산
-    - 메시지 형태로 결과 제공
+    - 이벤트 DB에 기록 (30분 후 반전 감지를 위해)
     """
     if len(rates) < MOVING_AVERAGE_PERIOD:
         return None, [], prev_upper, prev_lower, 0, 0
@@ -103,6 +174,8 @@ async def analyze_bollinger(
     upper_streak, lower_streak = 0, 0
     new_upper_level, new_lower_level = prev_upper, prev_lower
 
+    now = now_kst()
+
     if current > upper:
         status = "upper_breakout"
         upper_streak = prev_upper + 1
@@ -112,11 +185,13 @@ async def analyze_bollinger(
         deviation = distance
         tolerance = auto_tolerance(deviation)
 
-        # 상단 돌파 후 유사 초과폭 기준 조정 확률 계산
         prob = await get_reversal_probability_from_rates(conn, upper, deviation, tolerance, MOVING_AVERAGE_PERIOD)
         prob_msg = format_prob_msg("upper", prob)
         icon = "📈"
         label = "상단"
+
+        # ✅ 상단 돌파 이벤트 DB에 기록
+        await insert_breakout_event(conn, event_type="upper_breakout", timestamp=now, boundary=upper, threshold=upper)
 
     elif current < lower:
         status = "lower_breakout"
@@ -127,11 +202,13 @@ async def analyze_bollinger(
         deviation = distance
         tolerance = auto_tolerance(deviation)
 
-        # 하단 이탈 후 유사 초과폭 기준 반등 확률 계산
         prob = await get_bounce_probability_from_rates(conn, lower, deviation, tolerance, MOVING_AVERAGE_PERIOD)
         prob_msg = format_prob_msg("lower", prob)
         icon = "📉"
         label = "하단"
+
+        # ✅ 하단 이탈 이벤트 DB에 기록
+        await insert_breakout_event(conn, event_type="lower_breakout", timestamp=now, boundary=lower, threshold=lower)
 
     else:
         return None, [], prev_upper, prev_lower, 0, 0
@@ -152,7 +229,7 @@ async def analyze_bollinger(
         f"{band_msg}"
     )
 
-    # 반복 경고 메시지 확인
+    # 반복 경고 메시지
     u_level, l_level, streak_msg = get_streak_advisory(
         upper=upper_streak,
         lower=lower_streak,

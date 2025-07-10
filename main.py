@@ -1,6 +1,6 @@
 import asyncio
 from datetime import datetime
-from config import CHECK_INTERVAL, LONG_TERM_PERIOD
+from config import CHECK_INTERVAL, ENVIRONMENT, LONG_TERM_PERIOD
 from strategies.utils.streak import get_streak_advisory
 from utils import is_weekend, now_kst, is_scrape_time
 from fetcher import get_usdkrw_rate, fetch_expected_range
@@ -14,8 +14,10 @@ from strategies import (
     analyze_jump,
     analyze_crossover,
     analyze_combo,
-    analyze_expected_range
+    analyze_expected_range,
+    check_breakout_reversals
 )
+
 
 async def run_watcher():
     """ 워처 메인 루프
@@ -25,8 +27,10 @@ async def run_watcher():
     """
     print(f"[{now_kst()}] 🏁 워처 시작")
     # 초기 시작 메시지 전송
-    # 주석 처리된 부분은 필요시 활성화
-    # await send_start_message()
+    # 로컬 환경에서만 시작 메시지 전송
+    # (배포 환경에서는 이미 시작 메시지가 전송되었으므로 중복 방지)
+    if ENVIRONMENT == "local":
+        await send_start_message()
 
     conn = await connect_to_db()
     prev_rate = None
@@ -73,6 +77,11 @@ async def run_watcher():
                     print(f"[{now}] 📈 환율: {rate}")
                     await store_rate(conn, rate)
                     rates = await get_recent_rates(conn, LONG_TERM_PERIOD)
+
+                    # ✅ 이전 이벤트 중 30분 이내 반등/되돌림 감지
+                    reversal_msgs = await check_breakout_reversals(conn, rate, now)
+                    for r_msg in reversal_msgs:
+                        await send_telegram(r_msg)
 
                     # ✅ 예상 범위 벗어남 감지
                     expected_range = await get_today_expected_range(conn)
@@ -133,6 +142,7 @@ async def run_watcher():
     finally:
         await close_db_connection(conn)
         print(f"[{datetime.now()}] 🛑 워처 종료, DB 연결 닫힘")
+
 
 if __name__ == "__main__":
     asyncio.run(run_watcher())

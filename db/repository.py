@@ -195,3 +195,54 @@ async def get_reversal_probability_from_rates(
     if row and row["total_matched"] > 0:
         return round(row["correction_count"] / row["total_matched"] * 100, 1)
     return 0.0
+
+
+async def insert_breakout_event(conn, event_type: str, timestamp: datetime, boundary: float, threshold: float):
+    """
+    breakout_events 테이블에 이벤트 기록
+    """
+    await conn.execute(
+        """
+        INSERT INTO breakout_events (event_type, timestamp, boundary, threshold)
+        VALUES ($1, $2, $3, $4)
+        """,
+        event_type, timestamp, boundary, threshold
+    )
+
+
+async def get_recent_breakout_events(conn, cutoff_time):
+    return await conn.fetch(
+        """
+        SELECT id, event_type, timestamp, boundary, threshold, resolved
+        FROM breakout_events
+        WHERE timestamp >= $1
+        ORDER BY timestamp ASC
+        """,
+        cutoff_time
+    )
+
+
+async def get_pending_breakouts(conn) -> list[dict]:
+    """
+    아직 해결되지 않은 최근 30분 이내 이벤트 불러오기
+    """
+    query = """
+        SELECT id, event_type, timestamp, boundary, threshold
+        FROM breakout_events
+        WHERE resolved = FALSE
+          AND timestamp >= NOW() - INTERVAL '30 minutes'
+        ORDER BY timestamp ASC
+    """
+    return await conn.fetch(query)
+
+
+async def mark_breakout_resolved(conn, event_id: int) -> None:
+    """
+    breakout 이벤트를 해결(resolved) 상태로 변경
+    """
+    query = """
+        UPDATE breakout_events
+        SET resolved = TRUE, resolved_at = NOW()
+        WHERE id = $1
+    """
+    await conn.execute(query, event_id)

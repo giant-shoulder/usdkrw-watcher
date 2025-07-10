@@ -1,5 +1,5 @@
 # 모든 전략 분석 모듈 통합
-from .bollinger import analyze_bollinger
+from .bollinger import analyze_bollinger, check_breakout_reversals
 from .crossover import analyze_crossover
 from .jump import analyze_jump
 from .combo import analyze_combo
@@ -10,5 +10,6 @@ __all__ = [
     "analyze_crossover",
     "analyze_jump",
     "analyze_combo",
-    "analyze_expected_range"
+    "analyze_expected_range",
+    "check_breakout_reversals"
 ]
