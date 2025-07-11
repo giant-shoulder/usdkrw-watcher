@@ -106,7 +106,7 @@ def format_realized_breakout_message(
     실제 되돌림/반등 발생 시 사용자 알림 메시지 구성
     """
     is_upper = event_type == "upper_breakout"
-    icon = "📈" if is_upper else "📉"
+    icon = "📉" if is_upper else "📈"
     title = f"{icon} *볼린저 밴드 {'상단선 돌파' if is_upper else '하단선 이탈'} 후 실제 {'되돌림(하락)' if is_upper else '반등'} 감지!*"
 
     line1 = f"📏 {'상단 기준선' if is_upper else '하단 기준선'}: {threshold:.2f}원"
