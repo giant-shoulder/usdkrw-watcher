@@ -27,10 +27,7 @@ async def run_watcher():
     """
     print(f"[{now_kst()}] 🏁 워처 시작")
     # 초기 시작 메시지 전송
-    # 로컬 환경에서만 시작 메시지 전송
-    # (배포 환경에서는 이미 시작 메시지가 전송되었으므로 중복 방지)
-    if ENVIRONMENT == "local":
-        await send_start_message()
+    await send_start_message()
 
     conn = await connect_to_db()
     prev_rate = None
@@ -52,24 +49,25 @@ async def run_watcher():
                     continue
 
                 # ✅ 오전 11시대 스크랩 조건 확인
-                # if is_scrape_time(last_scraped_date):
-                #     try:
-                #         result = fetch_expected_range()
-                #         msg = (
-                #             "📊 *오늘의 예상 환율 레인지*\n"
-                #             f"• 하단: *{result['low']:.2f}원*\n"
-                #             f"• 상단: *{result['high']:.2f}원*\n"
-                #             f"출처: {result['source']}"
-                #         )
-                #         print(msg)
+                if is_scrape_time(last_scraped_date):
+                    try:
+                        result = fetch_expected_range()
+                        msg = (
+                            "📊 *오늘의 예상 환율 레인지*\n"
+                            f"• 하단: *{result['low']:.2f}원*\n"
+                            f"• 상단: *{result['high']:.2f}원*\n"
+                            f"출처: {result['source']}"
+                        )
+                        print(msg)
 
-                #         await store_expected_range(conn, now.date(), result["low"], result["high"], result["source"])
-                #         await send_telegram(msg)
-                #         last_scraped_date = now.date()
-                #     except Exception as e:
-                #         err_msg = f"⚠️ 예상 환율 레인지 스크래핑 실패:\n{e}"
-                #         print(err_msg)
-                #         await send_telegram(err_msg)
+                        await store_expected_range(conn, now.date(), result["low"], result["high"], result["source"])
+                        await send_telegram(msg)
+                        last_scraped_date = now.date()
+                    except Exception as e:
+                        err_msg = f"⚠️ 예상 환율 레인지 스크래핑 실패:\n{e}"
+                        print(err_msg)
+                        # 특정 대상(개발자)에게만 전송
+                        await send_telegram(err_msg, target_chat_ids=["7650730456"])
 
                 # ✅ 환율 조회
                 rate = get_usdkrw_rate()

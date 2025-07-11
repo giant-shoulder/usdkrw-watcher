@@ -33,17 +33,20 @@ async def send_start_message():
         f"⏱️ *환율은 {CHECK_INTERVAL // 60}분 {CHECK_INTERVAL % 60}초마다 자동 분석됩니다.*\n"
         "🌙 *주말과 평일 새벽 0시~7시에는 알림이 자동으로 중단됩니다.*"
     )
-    await send_telegram(msg)
+    # 특정 대상(개발자)에게만 전송
+    await send_telegram(msg, target_chat_ids=["7650730456"])
 
-async def send_telegram(message: str):
+async def send_telegram(message: str, target_chat_ids: list[str] | None = None):
     """
     새벽 0~7시 사이에는 알림 전송 안 함.
-    여러 수신자(chat_id)에 메시지를 전송함.
+    기본은 CHAT_IDS 전체에게, 특정 대상에게만 보낼 경우 target_chat_ids 지정.
     """
     if is_sleep_time():
         return
 
-    for cid in CHAT_IDS:
+    recipients = target_chat_ids if target_chat_ids else CHAT_IDS
+
+    for cid in recipients:
         try:
             await bot.send_message(chat_id=cid.strip(), text=message)
         except Exception as e:
