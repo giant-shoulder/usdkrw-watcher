@@ -33,11 +33,18 @@ def analyze_combo(
     }
     active_signals = {k: v for k, v in signals.items() if v}
 
-    # 점수 계산
+    if not active_signals:
+        return None
+
+    # 점수 및 방향성 판단
     score = get_signal_score(active_signals)
     direction = get_signal_direction(active_signals.values())
 
-    # 콤보 적용 조건: ① 전략 수 ≥ 2 ② 단일 전략 점수 ≥ 30
+    # ✅ 단일 전략일 경우 conflict → neutral 처리
+    if len(active_signals) == 1 and direction == "conflict":
+        direction = "neutral"
+
+    # 콤보 메시지 생성 조건: 전략 수 ≥ 2 또는 단일 전략 + 점수 30 이상
     should_apply_combo = (
         len(active_signals) >= 2
         or (len(active_signals) == 1 and score >= 30)
@@ -46,9 +53,15 @@ def analyze_combo(
     if not should_apply_combo:
         return None
 
-    # 헤더, 액션 메시지
-    header = generate_combo_summary(score=score, matched=len(active_signals), total=len(signals), direction=direction)
-    action = {
+    # 헤더 및 해석 메시지
+    header = generate_combo_summary(
+        score=score,
+        matched=len(active_signals),
+        total=len(signals),
+        direction=direction
+    )
+
+    action_messages = {
         "buy": (
             "🟢 *매수 진입 타이밍으로 판단됩니다.*\n"
             "📉 *시장이 과도하게 하락했거나, 반등 신호가 감지되었습니다.*\n"
@@ -67,13 +80,14 @@ def analyze_combo(
             "ℹ️ *명확한 방향성이 없습니다.*\n"
             "💡 시장 상황을 조금 더 지켜보는 것이 좋겠습니다."
         )
-    }.get(direction, "해석 오류")
+    }
+    action = action_messages.get(direction, "⚠️ 방향성 해석 실패")
 
-    # 전략별 상세 메시지 구성
+    # 전략별 상세 메시지
     signal_details = "\n\n".join([f"{k}\n{v}" for k, v in active_signals.items()])
     score_bar = get_score_bar(score, direction)
 
-    # 반복 경고 추가
+    # streak 관련 추가 참고 메시지
     new_upper, new_lower, streak_msg = get_streak_advisory(
         upper_streak, lower_streak,
         cross_msg=c_msg,
