@@ -11,6 +11,7 @@ from db import (
     mark_breakout_resolved
 )
 from utils import now_kst
+EPSILON = 0.01  # 기준선과 거의 같은 경우 오차 허용
 
 
 def get_volatility_info(band_width: float) -> tuple[str, str]:
@@ -74,12 +75,10 @@ async def check_breakout_reversals(conn, current_rate: float, current_time) -> l
 
         realized = False
 
-        if event_type == "lower_breakout" and current_rate >= threshold:
-            direction = "lower"
+        if event_type == "lower_breakout" and current_rate >= threshold + EPSILON:
             realized = True
 
-        elif event_type == "upper_breakout" and current_rate <= threshold:
-            direction = "upper"
+        elif event_type == "upper_breakout" and current_rate <= threshold - EPSILON:
             realized = True
 
         if realized:
@@ -139,12 +138,6 @@ async def analyze_bollinger(
     cross_msg: str = None,
     jump_msg: str = None
 ) -> tuple[str | None, list[str], int, int, int, int]:
-    """
-    볼린저 밴드 분석 함수
-    - 현재 환율이 밴드 상단/하단을 돌파하거나 이탈했는지 판단
-    - 돌파/이탈 시 유사한 과거 조건에서의 반등 또는 조정 확률 계산
-    - 이벤트 DB에 기록 (30분 후 반전 감지를 위해)
-    """
     if len(rates) < MOVING_AVERAGE_PERIOD:
         return None, [], prev_upper, prev_lower, 0, 0
 
@@ -154,9 +147,12 @@ async def analyze_bollinger(
     lower = avg - 2 * std
     band_width = upper - lower
 
+    # 밴드 폭이 너무 작을 경우 분석 의미 없음
+    if band_width < EPSILON:
+        return None, [], prev_upper, prev_lower, 0, 0
+
     volatility_label, volatility_comment = get_volatility_info(band_width)
 
-    # 현재가 vs 이전가 비교
     arrow = ""
     diff_section = ""
     if prev is not None:
@@ -176,7 +172,7 @@ async def analyze_bollinger(
 
     now = now_kst()
 
-    if current > upper:
+    if current > upper + EPSILON:
         status = "upper_breakout"
         upper_streak = prev_upper + 1
         lower_streak = 0
@@ -190,10 +186,9 @@ async def analyze_bollinger(
         icon = "📈"
         label = "상단"
 
-        # ✅ 상단 돌파 이벤트 DB에 기록
         await insert_breakout_event(conn, event_type="upper_breakout", timestamp=now, boundary=upper, threshold=upper)
 
-    elif current < lower:
+    elif current < lower - EPSILON:
         status = "lower_breakout"
         lower_streak = prev_lower + 1
         upper_streak = 0
@@ -207,19 +202,16 @@ async def analyze_bollinger(
         icon = "📉"
         label = "하단"
 
-        # ✅ 하단 이탈 이벤트 DB에 기록
         await insert_breakout_event(conn, event_type="lower_breakout", timestamp=now, boundary=lower, threshold=lower)
 
     else:
         return None, [], prev_upper, prev_lower, 0, 0
 
-    # 밴드 폭 메시지 구성
     band_msg = (
         f"{icon} 현재 밴드 폭은 *{band_width:.2f}원*입니다.\n"
         f"→ {volatility_label}으로, {volatility_comment}"
     )
 
-    # 종합 메시지 구성
     messages.append(
         f"{icon} 볼린저 밴드 {label} {'돌파' if label == '상단' else '이탈'}!\n"
         f"이동평균: {avg:.2f}\n현재: {current:.2f} {arrow}\n{label}: {upper if label == '상단' else lower:.2f}\n\n"
@@ -229,7 +221,6 @@ async def analyze_bollinger(
         f"{band_msg}"
     )
 
-    # 반복 경고 메시지
     u_level, l_level, streak_msg = get_streak_advisory(
         upper=upper_streak,
         lower=lower_streak,
