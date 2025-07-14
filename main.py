@@ -20,23 +20,23 @@ from strategies import (
 
 
 async def run_watcher():
-    """ 워처 메인 루프
-    - 환율 조회 및 분석
-    - 전략별 신호 분석 및 알림 전송
-    - DB 연결 및 관리
-    """
     print(f"[{now_kst()}] 🏁 워처 시작")
-    # 초기 시작 메시지 전송
     await send_start_message()
 
     conn = await connect_to_db()
     prev_rate = None
-    prev_short_avg, prev_long_avg = None, None
     upper_streak = 0
     lower_streak = 0
     prev_upper_level = 0
     prev_lower_level = 0
-    last_scraped_date = None  # 스크랩 시간 중복 방지
+    last_scraped_date = None
+
+    # ✅ 이동평균선 상태를 메모리로 관리
+    temp_state = {
+        "short_avg": None,
+        "long_avg": None,
+        "type": None,  # "golden" | "dead" | None
+    }
 
     try:
         while True:
@@ -48,7 +48,7 @@ async def run_watcher():
                     await asyncio.sleep(CHECK_INTERVAL)
                     continue
 
-                # ✅ 오전 11시대 스크랩 조건 확인
+                # ✅ 오전 11시대 스크랩
                 if is_scrape_time(last_scraped_date):
                     try:
                         result = fetch_expected_range()
@@ -59,14 +59,12 @@ async def run_watcher():
                             f"출처: {result['source']}"
                         )
                         print(msg)
-
                         await store_expected_range(conn, now.date(), result["low"], result["high"], result["source"])
                         await send_telegram(msg)
                         last_scraped_date = now.date()
                     except Exception as e:
                         err_msg = f"⚠️ 예상 환율 레인지 스크래핑 실패:\n{e}"
                         print(err_msg)
-                        # 특정 대상(개발자)에게만 전송
                         await send_telegram(err_msg, target_chat_ids=["7650730456"])
 
                 # ✅ 환율 조회
@@ -76,20 +74,27 @@ async def run_watcher():
                     await store_rate(conn, rate)
                     rates = await get_recent_rates(conn, LONG_TERM_PERIOD)
 
-                    # ✅ 이전 이벤트 중 30분 이내 반등/되돌림 감지
+                    # ✅ 되돌림 감지
                     reversal_msgs = await check_breakout_reversals(conn, rate, now)
                     for r_msg in reversal_msgs:
                         await send_telegram(r_msg)
 
-                    # ✅ 예상 범위 벗어남 감지
+                    # ✅ 전략별 분석
                     expected_range = await get_today_expected_range(conn)
                     e_msg = analyze_expected_range(rate, expected_range, now)
-
-                    # ✅ 점프 / 크로스 전략
                     j_msg = analyze_jump(prev_rate, rate)
-                    c_msg, prev_short_avg, prev_long_avg = analyze_crossover(rates, prev_short_avg, prev_long_avg)
 
-                    # ✅ 볼린저 전략 분석 (다중 메시지 + streak 업데이트 포함)
+                    # ✅ 크로스오버 리팩토링 적용
+                    c_msg, temp_state["short_avg"], temp_state["long_avg"], temp_state["type"] = analyze_crossover(
+                        rates=rates,
+                        prev_short_avg=temp_state["short_avg"],
+                        prev_long_avg=temp_state["long_avg"],
+                        prev_signal_type=temp_state["type"],
+                        prev_price=prev_rate,
+                        current_price=rate
+                    )
+
+                    # ✅ 볼린저 분석
                     b_status, b_msgs, upper_streak, lower_streak, prev_upper_level, prev_lower_level = await analyze_bollinger(
                         conn=conn,
                         rates=rates,
@@ -105,7 +110,7 @@ async def run_watcher():
                     single_msgs = [msg for msg in [j_msg, c_msg, e_msg] if msg]
                     single_msgs.extend(b_msgs)
 
-                    # ✅ 복합 전략 분석 및 메시지 전송
+                    # ✅ 콤보 전략 분석 및 메시지 전송
                     combo_result = analyze_combo(
                         b_status,
                         b_msgs[0] if b_msgs else None,
