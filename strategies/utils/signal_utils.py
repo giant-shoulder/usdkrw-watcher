@@ -2,43 +2,82 @@
 
 from config import SIGNAL_WEIGHTS
 
+# 각 전략별 메시지 특성상 신호 강도를 다르게 반영할 키워드 정의
+SIGNAL_KEYWORDS = {
+    "buy": {
+        "강한": {"골든크로스", "급반등", "강한 반전", "저점 매수"},
+        "약한": {"하락", "하단", "반전", "약세", "이탈"}
+    },
+    "sell": {
+        "강한": {"데드크로스", "급등", "과열 돌파", "고점"},
+        "약한": {"상단", "상승", "과열", "돌파"}
+    },
+    "neutral": {
+        "유지": {"골든 상태 유지", "데드 상태 유지"}
+    }
+}
+
 def get_signal_direction(messages):
-    """메시지 내 키워드 기반으로 buy/sell/conflict/neutral 판단"""
-    buy_keywords = {
-        "하단", "하락",        # 밴드 이탈 → 과매도
-        "골든크로스", "급반등", # 추세 전환 상승
-        "반전", "저점", "이탈", "약세"  # 예상보다 하락 → 저가 매수
-    }
-
-    sell_keywords = {
-        "상단", "상승",         # 밴드 상단 돌파 → 과열
-        "데드크로스", "급등",   # 추세 전환 하락 or 과열 급등
-        "고점", "과열", "돌파"   # 고점 도달 판단
-    }
-
+    """
+    메시지 내 키워드를 기반으로 방향성 판단
+    강/약 구분 + 중립 메시지는 제외 처리
+    """
     def contains(msg, keywords):
         return any(kw in msg for kw in keywords)
 
-    buy_score = sum(contains(msg, buy_keywords) for msg in messages if msg)
-    sell_score = sum(contains(msg, sell_keywords) for msg in messages if msg)
+    buy_score = 0
+    sell_score = 0
 
+    for msg in messages:
+        if not msg:
+            continue
+
+        # 강한 키워드 우선 반영 (2점)
+        if contains(msg, SIGNAL_KEYWORDS["buy"]["강한"]):
+            buy_score += 2
+        elif contains(msg, SIGNAL_KEYWORDS["buy"]["약한"]):
+            buy_score += 1
+
+        if contains(msg, SIGNAL_KEYWORDS["sell"]["강한"]):
+            sell_score += 2
+        elif contains(msg, SIGNAL_KEYWORDS["sell"]["약한"]):
+            sell_score += 1
+
+    # 방향성 판단
     if buy_score > 0 and sell_score == 0:
         return "buy"
     elif sell_score > 0 and buy_score == 0:
         return "sell"
     elif buy_score > 0 and sell_score > 0:
-        return "buy" if buy_score > sell_score else "sell" if sell_score > buy_score else "conflict"
-    return "neutral"
+        if buy_score > sell_score:
+            return "buy"
+        elif sell_score > buy_score:
+            return "sell"
+        else:
+            return "conflict"
+    else:
+        return "neutral"
 
 def get_signal_score(active_signals: dict[str, str]) -> int:
     """
-    활성화된 전략에 따라 종합 점수 계산.
-    각 전략별 가중치를 기준으로 계산하고, 최대 100점으로 제한.
+    전략별 시그널 메시지에 따라 가중치 차등 적용하여 점수 계산
+    - 전략 가중치 × 메시지 강도 (0.5~1.0) 적용
+    - 최대 100점 제한
     """
     score = 0
-    for signal_name in active_signals:
-        weight = SIGNAL_WEIGHTS.get(signal_name, 0)
-        score += weight
+    for name, msg in active_signals.items():
+        weight = SIGNAL_WEIGHTS.get(name, 0)
+
+        # 메시지가 유지 상태면 낮은 가중치 적용
+        if any(kw in msg for kw in SIGNAL_KEYWORDS["neutral"]["유지"]):
+            score += int(weight * 0.3)
+        # 강한 신호 포함 시 높은 점수 반영
+        elif any(kw in msg for kw in SIGNAL_KEYWORDS["buy"]["강한"] | SIGNAL_KEYWORDS["sell"]["강한"]):
+            score += weight
+        # 약한 키워드만 있을 경우 점수 일부만 반영
+        else:
+            score += int(weight * 0.6)
+
     return min(score, 100)
 
 def generate_combo_summary(score: int, matched: int, total: int, direction: str) -> str:
