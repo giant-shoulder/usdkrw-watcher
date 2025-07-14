@@ -77,7 +77,7 @@ def analyze_crossover(
             spread_diff = spread_now - prev_spread if prev_spread else 0
             price_diff = current_price - prev_price if (prev_price and current_price) else 0
 
-            # 상태 유지 유형 분기
+            # ✅ 이전과 상태가 달라졌거나 의미 있는 변화가 있을 때만 메시지 생성
             if prev_signal_type != signal_type:
                 strength_tag = "🔁 상태 전환 감지"
                 explain = f"{signal_type.capitalize()} 상태로 전환되었습니다."
@@ -93,8 +93,8 @@ def analyze_crossover(
                     strength_tag = "🔽 추세 약화 조짐"
                     explain = f"{'상승' if signal_type == 'golden' else '하락'} 흐름이 약해지고 있습니다."
             else:
-                strength_tag = "📌 추세 유지 중"
-                explain = "변화는 미미하지만 기존 흐름은 유지되고 있습니다."
+                # 🔇 변화가 작고 상태도 동일하면 메시지 생략
+                return None, short_ma, long_ma, signal_type
 
             signal = (
                 f"{'🟢' if signal_type == 'golden' else '🔴'} *{signal_type.capitalize()} 상태 유지 중*\n"
