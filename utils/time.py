@@ -19,14 +19,26 @@ def is_weekend() -> bool:
 
 def is_sleep_time() -> bool:
     """
-    운영 환경에서만 0시~7시 사이 True 반환
-    - local 환경은 항상 False (알림 발송 유지)
+    운영 환경에서만 알림 발송 제한 시간 적용
+    - local 환경: 항상 False (알림 발송 유지)
+    - 운영 환경:
+        • 월요일: 0시 ~ 7시까지 중지
+        • 화~금요일: 2시 ~ 7시까지 중지
+        • 주말: 기존 주말 처리 로직 따름 (is_weekend() 별도 사용)
     """
     if ENVIRONMENT == "local":
         return False
 
-    hour = now_kst().hour
-    return 0 <= hour < 7  # 0시 ~ 6시까지는 True
+    now = now_kst()
+    hour = now.hour
+    weekday = now.weekday()  # 월=0, 화=1, ... 일=6
+
+    if weekday == 0:  # 월요일
+        return 0 <= hour < 7
+    elif 1 <= weekday <= 4:  # 화~금
+        return 2 <= hour < 7
+    else:
+        return False
 
 def is_market_open() -> bool:
     """서울 외환시장 운영 시간 (09:00 ~ 15:30) 내인지 확인"""
