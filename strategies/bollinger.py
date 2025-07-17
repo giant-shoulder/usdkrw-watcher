@@ -54,45 +54,70 @@ def auto_tolerance(deviation: float) -> float:
         return 0.05
     else:
         return 0.10
-    
+
+
+def generate_realized_breakout_summary(matched_events: list) -> str:
+    """
+    여러 예측 일치 이벤트를 하나의 요약 메시지로 병합
+    matched_events: [(event_type, threshold, current, elapsed_min, predicted_prob), ...]
+    """
+    if not matched_events:
+        return None
+
+    lines = []
+    for i, (etype, th, curr, elapsed, prob) in enumerate(matched_events, start=1):
+        is_upper = etype == "upper_breakout"
+        action = "상단선 돌파" if is_upper else "하단선 이탈"
+        result = "상단 기준선 아래 복귀" if is_upper else "하단 기준선 위로 복귀"
+        lines.append(
+            f"{i}) {elapsed}분 전: {action} → {elapsed}분 만에 {result} "
+            f"(기준선: {th:.2f} / 현재: {curr:.2f})"
+        )
+
+    return (
+        f"✅ *최근 30분 내 예측 일치 보고*\n"
+        f"📌 {len(matched_events)}건의 예측이 모두 정확히 맞았습니다.\n\n" +
+        "\n".join(lines) +
+        "\n\n💡 동일 조건에서 향후 흐름 판단에 참고해 보세요."
+    )
+
+
 async def check_breakout_reversals(conn, current_rate: float, current_time) -> list[str]:
     """
-    최근 발생한 breakout 이벤트들 중 30분 이내 반등/되돌림이 실제 발생했는지 감지하여 메시지 생성
+    최근 발생한 breakout 이벤트들 중 30분 이내 반등/되돌림이 실제 발생했는지 감지하여
+    ✅ 여러 개 일치 시 하나의 요약 메시지로 병합
     """
     pending = await get_pending_breakouts(conn)
-    messages = []
+    matched_events = []
 
     for event in pending:
         event_id = event["id"]
         event_type = event["event_type"]
         timestamp = event["timestamp"]
         threshold = event["threshold"]
-        predicted_prob = event.get("predicted_probability", None)  # 선택적 필드
+        predicted_prob = event.get("predicted_probability", None)
         minutes_elapsed = int((current_time - timestamp).total_seconds() // 60)
 
         if minutes_elapsed > 30:
             continue
 
         realized = False
-
         if event_type == "lower_breakout" and current_rate >= threshold + EPSILON:
             realized = True
-
         elif event_type == "upper_breakout" and current_rate <= threshold - EPSILON:
             realized = True
 
         if realized:
-            msg = format_realized_breakout_message(
-                event_type=event_type,
-                threshold=threshold,
-                current=current_rate,
-                elapsed_min=minutes_elapsed,
-                predicted_prob=predicted_prob
+            matched_events.append(
+                (event_type, threshold, current_rate, minutes_elapsed, predicted_prob)
             )
-            messages.append(msg)
             await mark_breakout_resolved(conn, event_id)
 
-    return messages
+    # ✅ 병합 메시지 생성
+    if matched_events:
+        return [generate_realized_breakout_summary(matched_events)]
+    return []
+
 
 def format_realized_breakout_message(
     event_type: str,

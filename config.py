@@ -29,6 +29,13 @@ SHORT_TERM_PERIOD = 90            # 단기선: 5시간
 LONG_TERM_PERIOD = 306            # 장기선: 17시간
 JUMP_THRESHOLD = 1.0              # 급변 기준 (1원 이상)
 
+# === 이동평균선(크로스) 세부 설정 ===
+EPSILON = 0.005                     # 단기/장기 평균선 동등 판단 오차 허용
+SPREAD_DIFF_THRESHOLD = 0.12        # 유지 상태 추세 강화/약화 판단 기준
+PRICE_GAP_THRESHOLD = 1.0           # 유지 상태 가격 변화 판단 기준
+MIN_REPORT_INTERVAL = 900           # 유지 상태 의미 있는 변화 보고 최소 간격(15분)
+REMINDER_INTERVAL = 3600            # 유지 상태 리마인드 주기(1시간)
+
 # 📊 전략별 점수 가중치
 SIGNAL_WEIGHTS = {
     "📊 볼린저 밴드": 21,
