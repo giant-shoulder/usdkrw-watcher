@@ -28,6 +28,7 @@ MOVING_AVERAGE_PERIOD = 45        # 볼린저: 2.5시간
 SHORT_TERM_PERIOD = 90            # 단기선: 5시간
 LONG_TERM_PERIOD = 306            # 장기선: 17시간
 JUMP_THRESHOLD = 1.0              # 급변 기준 (1원 이상)
+SUMMARY_INTERVAL = 1800           # 30분
 
 # === 이동평균선(크로스) 세부 설정 ===
 EPSILON = 0.005                     # 단기/장기 평균선 동등 판단 오차 허용

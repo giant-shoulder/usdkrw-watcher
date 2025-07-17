@@ -1,6 +1,7 @@
 import asyncio
-from datetime import datetime
-from config import CHECK_INTERVAL, ENVIRONMENT, LONG_TERM_PERIOD
+from datetime import datetime, timedelta
+from config import CHECK_INTERVAL, ENVIRONMENT, LONG_TERM_PERIOD, SUMMARY_INTERVAL
+from strategies.summary import get_recent_major_events
 from strategies.utils.streak import get_streak_advisory
 from utils import is_weekend, now_kst, is_scrape_time
 from fetcher import get_usdkrw_rate, fetch_expected_range
@@ -15,11 +16,19 @@ from strategies import (
     analyze_crossover,
     analyze_combo,
     analyze_expected_range,
-    check_breakout_reversals
+    check_breakout_reversals,
+    generate_30min_summary
 )
 
 
+# ✅ 30분 요약용 변수
+last_summary_sent = None
+rate_buffer = []  # [(timestamp, rate), ...]
+
+
 async def run_watcher():
+    global last_summary_sent, rate_buffer
+
     print(f"[{now_kst()}] 🏁 워처 시작")
     await send_start_message()
 
@@ -84,7 +93,7 @@ async def run_watcher():
                     e_msg = analyze_expected_range(rate, expected_range, now)
                     j_msg = analyze_jump(prev_rate, rate)
 
-                    # ✅ 크로스오버 리팩토링 적용
+                    # ✅ 크로스오버 분석
                     c_msg, temp_state["short_avg"], temp_state["long_avg"], temp_state["type"] = analyze_crossover(
                         rates=rates,
                         prev_short_avg=temp_state["short_avg"],
@@ -133,6 +142,25 @@ async def run_watcher():
 
                     # ✅ 이전 환율 갱신
                     prev_rate = rate
+
+                    # ✅ 30분 요약용 데이터 버퍼 업데이트
+                    rate_buffer.append((now, rate))
+                    rate_buffer = [(t, r) for t, r in rate_buffer if (now - t).total_seconds() <= SUMMARY_INTERVAL]
+
+                    # ✅ 정시(00,30분) 요약 발송
+                    if (
+                        now.minute in (0, 30)
+                        and (last_summary_sent is None or (now - last_summary_sent).total_seconds() >= SUMMARY_INTERVAL)
+                    ):
+                        major_events = await get_recent_major_events(conn, now)
+                        summary_msg = generate_30min_summary(
+                            start_time=now - timedelta(seconds=SUMMARY_INTERVAL),
+                            end_time=now,
+                            rates=rate_buffer,
+                            major_events=major_events
+                        )
+                        await send_telegram(summary_msg)
+                        last_summary_sent = now
 
                 else:
                     print(f"[{datetime.now()}] ❌ 환율 조회 실패")
