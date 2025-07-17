@@ -1,6 +1,12 @@
 from datetime import datetime, timedelta
 from statistics import mean
 from config import MOVING_AVERAGE_PERIOD
+from io import BytesIO
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import matplotlib.font_manager as fm
+
 
 def classify_volatility(high: float, low: float) -> str:
     """변동폭에 따른 간단한 변동성 평가"""
@@ -22,7 +28,7 @@ async def get_recent_major_events(conn, current_time) -> list[str]:
     query = """
         SELECT event_type, timestamp, threshold
         FROM breakout_events
-        WHERE timestamp >= %s
+        WHERE timestamp >= $1
         ORDER BY timestamp ASC
     """
     rows = await conn.fetch(query, cutoff_time)
@@ -30,7 +36,7 @@ async def get_recent_major_events(conn, current_time) -> list[str]:
     events = []
     for row in rows:
         etype = row["event_type"]
-        ts = row["timestamp"].astimezone()  # KST 변환은 필요 시 utils 활용
+        ts = row["timestamp"].astimezone()
         hhmm = ts.strftime("%H:%M")
         if etype == "upper_breakout":
             events.append(f"{hhmm} 볼린저 상단 돌파 (기준선 {row['threshold']:.2f})")
@@ -93,3 +99,64 @@ def generate_30min_summary(
         f"{events_text}\n\n"
         f"💡 *종합 해석*: {advice}"
     )
+
+def generate_30min_chart(rates: list[tuple[datetime, float]]) -> BytesIO:
+    """
+    30분간 환율 추이 그래프 생성 (영문 only)
+    - 상승=빨강, 하락=파랑, 횡보=회색
+    - 첫 환율, 마지막 환율만 강조 표시
+    """
+    if not rates:
+        return None
+
+    times = [r[0].strftime("%H:%M") for r in rates]
+    values = [r[1] for r in rates]
+
+    # ✅ 추세 색상
+    if values[-1] > values[0]:
+        color = "red"
+    elif values[-1] < values[0]:
+        color = "blue"
+    else:
+        color = "gray"
+
+    plt.figure(figsize=(6, 3))
+    plt.plot(times, values, marker="o", linewidth=2, color=color)
+    plt.xticks(rotation=45)
+    plt.title("USD/KRW Last 30 min")
+    plt.xlabel("Time")
+    plt.ylabel("KRW")
+    plt.grid(True)
+
+    # ✅ 첫 환율(시작점) 강조
+    plt.scatter(times[0], values[0], color=color, s=60, edgecolors="black", zorder=5)
+    plt.text(
+        times[0],
+        values[0],
+        f"{values[0]:.2f}",
+        fontsize=8,
+        color="black",
+        ha="right",
+        va="bottom",
+        bbox=dict(facecolor="white", edgecolor="gray", boxstyle="round,pad=0.2")
+    )
+
+    # ✅ 마지막 환율(현재가) 강조
+    plt.scatter(times[-1], values[-1], color=color, s=80, edgecolors="black", zorder=5)
+    plt.text(
+        times[-1],
+        values[-1],
+        f"{values[-1]:.2f}",
+        fontsize=9,
+        color="black",
+        ha="left",
+        va="bottom",
+        bbox=dict(facecolor="white", edgecolor="gray", boxstyle="round,pad=0.2")
+    )
+
+    buf = BytesIO()
+    plt.tight_layout()
+    plt.savefig(buf, format="png")
+    buf.seek(0)
+    plt.close()
+    return buf

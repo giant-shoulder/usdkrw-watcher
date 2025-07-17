@@ -4,7 +4,7 @@ from .crossover import analyze_crossover
 from .jump import analyze_jump
 from .combo import analyze_combo
 from .expected_range import analyze_expected_range
-from .summary import generate_30min_summary
+from .summary import generate_30min_summary, generate_30min_chart
 
 __all__ = [
     "analyze_bollinger",
@@ -13,5 +13,6 @@ __all__ = [
     "analyze_combo",
     "analyze_expected_range",
     "check_breakout_reversals",
-    "generate_30min_summary"
+    "generate_30min_summary",
+    "generate_30min_chart"
 ]

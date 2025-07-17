@@ -9,7 +9,7 @@ from db import (
     connect_to_db, close_db_connection,
     store_rate, get_recent_rates, store_expected_range, get_today_expected_range
 )
-from notifier import send_telegram, send_start_message
+from notifier import send_telegram, send_start_message, send_photo
 from strategies import (
     analyze_bollinger,
     analyze_jump,
@@ -17,7 +17,8 @@ from strategies import (
     analyze_combo,
     analyze_expected_range,
     check_breakout_reversals,
-    generate_30min_summary
+    generate_30min_summary,
+    generate_30min_chart
 )
 
 
@@ -160,6 +161,11 @@ async def run_watcher():
                             major_events=major_events
                         )
                         await send_telegram(summary_msg)
+
+                        chart_buf = generate_30min_chart(rate_buffer)
+                        if chart_buf:
+                            await send_photo(chart_buf)  # 그래프 이미지 전송
+
                         last_summary_sent = now
 
                 else:

@@ -19,27 +19,17 @@ async def send_start_message():
         "• 📉 환율이 *급격히 하락*할 때\n"
         "• 📊 환율이 *볼린저 밴드 상단 또는 하단을 돌파*할 때\n"
         "• 🔁 *이동 평균선의 흐름이 바뀔 때* (골든/데드 크로스)\n"
-        "• 📡 *시장 예상 환율 범위를 벗어날 때* (예: 상단 돌파 또는 하단 이탈)\n"
+        "• 📡 *시장 예상 환율 범위를 벗어날 때*\n"
         "• 🎯 *2가지 이상 신호가 동시에 발생*할 때 → *복합 경고와 방향성 안내*\n\n"
         "📦 *전략 해설*\n"
-        "• 📊 *볼린저 밴드*: 최근 2.5시간 기준, 환율이 평균보다 *크게 벗어난 경우*\n"
-        f"• ⚡ *급등락 감지*: *직전({CHECK_INTERVAL // 60}분 {CHECK_INTERVAL % 60}초 전)*보다 *±1.0원 이상 변동* 시\n"
-        "• 🔁 *이동 평균선 교차*:\n"
-        "   ├─ 🟢 *골든 크로스*: 단기선이 장기선을 *상향 돌파* → 상승 전환 신호\n"
-        "   └─ 🔴 *데드 크로스*: 단기선이 장기선을 *하향 돌파* → 하락 전환 신호\n"
-        "• 📡 *예상 환율 범위 감지*: 연합인포맥스 등에서 제시한 *당일 고/저 예상 범위*를 초과하면 알림\n"
-        "• 🧭 *반복 돌파 감지*: *상단/하단을 여러 번 연속 돌파* 시 과열 또는 과매도 경고\n"
-        "• 🎯 *복합 전략 분석*: *2가지 이상 신호가 겹치면 점수를 계산하고 방향까지 안내*\n\n"
         f"⏱️ *환율은 {CHECK_INTERVAL // 60}분 {CHECK_INTERVAL % 60}초마다 자동 분석됩니다.*\n"
         "🌙 *주말과 평일 새벽 0시~7시에는 알림이 자동으로 중단됩니다.*"
     )
-    # 특정 대상(개발자)에게만 전송
     await send_telegram(msg, target_chat_ids=["7650730456"])
 
 async def send_telegram(message: str, target_chat_ids: list[str] | None = None):
     """
-    새벽 0~7시 사이에는 알림 전송 안 함.
-    기본은 CHAT_IDS 전체에게, 특정 대상에게만 보낼 경우 target_chat_ids 지정.
+    텍스트 전송용 (알림 제한 시간 적용)
     """
     if is_sleep_time():
         return
@@ -48,6 +38,29 @@ async def send_telegram(message: str, target_chat_ids: list[str] | None = None):
 
     for cid in recipients:
         try:
-            await bot.send_message(chat_id=cid.strip(), text=message)
+            await bot.send_message(chat_id=cid.strip(), text=message, parse_mode="Markdown")
         except Exception as e:
             print(f"❌ 전송 실패 ({cid}):", e)
+
+# ✅ 이미지 전송용 함수
+async def send_photo(photo_buf, caption: str | None = None, target_chat_ids: list[str] | None = None):
+    """
+    이미지 전송용 (알림 제한 시간 적용)
+    :param photo_buf: BytesIO 객체 (예: matplotlib로 생성)
+    :param caption: 선택적으로 짧은 설명 첨부 가능 (1024자 제한)
+    """
+    if is_sleep_time():
+        return
+
+    recipients = target_chat_ids if target_chat_ids else CHAT_IDS
+
+    for cid in recipients:
+        try:
+            await bot.send_photo(
+                chat_id=cid.strip(),
+                photo=photo_buf,
+                caption=caption if caption else None,
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            print(f"❌ 사진 전송 실패 ({cid}):", e)
