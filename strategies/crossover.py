@@ -111,7 +111,18 @@ def analyze_crossover(
                 # ✅ 리마인드 (1시간마다 1회)
                 elif elapsed >= REMINDER_INTERVAL:
                     tag = "ℹ️ 상태 지속 리마인드"
-                    explain = f"{'상승' if signal_type == 'golden' else '하락'} 상태가 유지되고 있습니다."
+
+                    if signal_type == "golden":
+                        if price_diff < 0:
+                            explain = "중기 상승 추세는 유지되지만 단기적으로 조정(하락) 중입니다."
+                        else:
+                            explain = "상승 상태가 유지되고 있습니다."
+                    else:  # dead 상태
+                        if price_diff > 0:
+                            explain = "중기 하락 추세는 유지되지만 단기적으로 반등 중입니다."
+                        else:
+                            explain = "하락 상태가 유지되고 있습니다."
+
                     last_report_time[signal_type] = now
 
                 else:
