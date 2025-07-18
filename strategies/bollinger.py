@@ -161,7 +161,8 @@ async def analyze_bollinger(
     prev_upper: int = 0,
     prev_lower: int = 0,
     cross_msg: str = None,
-    jump_msg: str = None
+    jump_msg: str = None,
+    prev_status: str = None  # ✅ 추가: 이전 상태 전달
 ) -> tuple[str | None, list[str], int, int, int, int]:
     if len(rates) < MOVING_AVERAGE_PERIOD:
         return None, [], prev_upper, prev_lower, 0, 0
@@ -172,7 +173,6 @@ async def analyze_bollinger(
     lower = avg - 2 * std
     band_width = upper - lower
 
-    # 밴드 폭이 너무 작을 경우 분석 의미 없음
     if band_width < EPSILON:
         return None, [], prev_upper, prev_lower, 0, 0
 
@@ -199,35 +199,51 @@ async def analyze_bollinger(
 
     if current > upper + EPSILON:
         status = "upper_breakout"
+
+        # ✅ 동일 상태면 발송 금지
+        if prev_status == status:
+            return status, [], prev_upper, prev_lower, prev_upper, prev_lower
+
         upper_streak = prev_upper + 1
         lower_streak = 0
         distance = round(current - upper, 2)
-
         deviation = distance
         tolerance = auto_tolerance(deviation)
 
-        prob = await get_reversal_probability_from_rates(conn, upper, deviation, tolerance, MOVING_AVERAGE_PERIOD)
+        prob = await get_reversal_probability_from_rates(
+            conn, upper, deviation, tolerance, MOVING_AVERAGE_PERIOD
+        )
         prob_msg = format_prob_msg("upper", prob)
         icon = "📈"
         label = "상단"
 
-        await insert_breakout_event(conn, event_type="upper_breakout", timestamp=now, boundary=upper, threshold=upper)
+        await insert_breakout_event(
+            conn, event_type="upper_breakout", timestamp=now, boundary=upper, threshold=upper
+        )
 
     elif current < lower - EPSILON:
         status = "lower_breakout"
+
+        # ✅ 동일 상태면 발송 금지
+        if prev_status == status:
+            return status, [], prev_upper, prev_lower, prev_upper, prev_lower
+
         lower_streak = prev_lower + 1
         upper_streak = 0
         distance = round(lower - current, 2)
-
         deviation = distance
         tolerance = auto_tolerance(deviation)
 
-        prob = await get_bounce_probability_from_rates(conn, lower, deviation, tolerance, MOVING_AVERAGE_PERIOD)
+        prob = await get_bounce_probability_from_rates(
+            conn, lower, deviation, tolerance, MOVING_AVERAGE_PERIOD
+        )
         prob_msg = format_prob_msg("lower", prob)
         icon = "📉"
         label = "하단"
 
-        await insert_breakout_event(conn, event_type="lower_breakout", timestamp=now, boundary=lower, threshold=lower)
+        await insert_breakout_event(
+            conn, event_type="lower_breakout", timestamp=now, boundary=lower, threshold=lower
+        )
 
     else:
         return None, [], prev_upper, prev_lower, 0, 0
@@ -239,7 +255,8 @@ async def analyze_bollinger(
 
     messages.append(
         f"{icon} 볼린저 밴드 {label} {'돌파' if label == '상단' else '이탈'}!\n"
-        f"이동평균: {avg:.2f}\n현재: {current:.2f} {arrow}\n{label}: {upper if label == '상단' else lower:.2f}\n\n"
+        f"이동평균: {avg:.2f}\n현재: {current:.2f} {arrow}\n"
+        f"{label}: {upper if label == '상단' else lower:.2f}\n\n"
         f"📏 현재가가 {label}보다 {abs(distance):.2f}원 {'위' if label == '상단' else '아래'}입니다."
         f"{diff_section}\n\n"
         f"{prob_msg}\n\n"
@@ -252,7 +269,7 @@ async def analyze_bollinger(
         cross_msg=cross_msg,
         jump_msg=jump_msg,
         prev_upper=prev_upper,
-        prev_lower=prev_lower
+        prev_lower=prev_lower,
     )
     if streak_msg:
         messages.append(f"🧭 *동일 신호 반복 알림:*\n{streak_msg}")

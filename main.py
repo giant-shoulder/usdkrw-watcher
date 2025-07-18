@@ -113,8 +113,10 @@ async def run_watcher():
                         prev_upper=prev_upper_level,
                         prev_lower=prev_lower_level,
                         cross_msg=c_msg,
-                        jump_msg=j_msg
+                        jump_msg=j_msg,
+                        prev_status=temp_state.get("b_status")  # ✅ 추가
                     )
+                    temp_state["b_status"] = b_status
 
                     # ✅ 개별 전략 메시지 수집
                     single_msgs = [msg for msg in [j_msg, c_msg, e_msg] if msg]
