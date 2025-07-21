@@ -49,4 +49,8 @@ SIGNAL_WEIGHTS = {
 # 로컬 개발 환경에서는 .env 파일에서 ENVIRONMENT 변수를 설정할 수 있음
 # 프로덕션 환경에서는 이 변수를 설정하지 않음
 # 기본값은 "production"으로 설정
-ENVIRONMENT = os.getenv("ENVIRONMENT", "production")
+# ✅ .env 파일이 존재하면 로컬, 없으면 프로덕션
+if os.path.exists(".env"):
+    ENVIRONMENT = os.getenv("ENVIRONMENT", "local")
+else:
+    ENVIRONMENT = "production"
