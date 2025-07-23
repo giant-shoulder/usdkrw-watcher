@@ -52,11 +52,7 @@ def generate_30min_summary(
     major_events: list[str] = None
 ) -> str:
     """
-    30분 간 환율 요약 메시지 생성
-    :param start_time: 30분 시작 시각
-    :param end_time: 30분 종료 시각
-    :param rates: [(timestamp, rate), ...]
-    :param major_events: 주요 이벤트 리스트 (문자열)
+    30분 간 환율 요약 메시지 생성 (혼조/횡보 세분화 버전)
     """
     if not rates:
         return "⏱️ 최근 30분 데이터가 없습니다."
@@ -67,27 +63,42 @@ def generate_30min_summary(
     high = max(r[1] for r in sorted_rates)
     low = min(r[1] for r in sorted_rates)
     diff = round(end_rate - start_rate, 2)
-
-    # 추세 분류
-    if diff > 0.05:
-        trend = "상승"
-    elif diff < -0.05:
-        trend = "하락"
-    else:
-        trend = "횡보"
-
     volatility = classify_volatility(high, low)
 
-    # 주요 이벤트 요약
+    high_diff = round(high - end_rate, 2)
+    low_diff = round(end_rate - low, 2)
+    band_width = round(high - low, 2)
+
+    # ✅ 세분화된 추세 분류
+    if band_width <= 0.2:
+        trend = "횡보"
+    elif diff > 0.05 and high > start_rate and low >= start_rate - 0.05:
+        trend = "상승"
+    elif diff < -0.05 and low < start_rate and high <= start_rate + 0.05:
+        trend = "하락"
+    elif abs(diff) < 0.1 and high_diff > 0.2:
+        trend = "급등 후 조정"
+    elif abs(diff) < 0.1 and low_diff > 0.2:
+        trend = "급락 후 반등"
+    else:
+        trend = "혼조"
+
+    # ✅ 주요 이벤트 요약
     events_text = "\n".join([f"- {e}" for e in major_events]) if major_events else "해당 없음"
 
-    # 간단한 해석 (임시 규칙)
-    if trend == "상승" and diff > 0.5:
-        advice = "상승세 지속 → 소량 매수 가능"
-    elif trend == "하락" and abs(diff) > 0.5:
-        advice = "단기 하락세 → 관망 권장"
-    else:
-        advice = "추세 혼조 → 관망 우선"
+    # ✅ 종합 해석
+    if trend == "상승":
+        advice = "상승 흐름 유지 → 관망 후 소량 매수 고려"
+    elif trend == "하락":
+        advice = "하락 흐름 유지 → 관망 권장"
+    elif trend == "급등 후 조정":
+        advice = "급등 이후 되돌림 진행 중 → 추세 전환 가능성 주의"
+    elif trend == "급락 후 반등":
+        advice = "급락 이후 단기 반등 → 추세 지속 여부 확인 필요"
+    elif trend == "혼조":
+        advice = "단기 등락 반복 → 관망 우선"
+    else:  # 횡보
+        advice = "변동성 낮음 → 관망 유지"
 
     return (
         f"⏱️ *최근 30분 환율 요약 ({start_time.strftime('%H:%M')} ~ {end_time.strftime('%H:%M')})*\n\n"
