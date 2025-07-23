@@ -23,8 +23,8 @@ from strategies import (
 
 
 # ✅ 30분 요약용 변수
-last_summary_sent = None
-rate_buffer = []  # [(timestamp, rate), ...]
+last_summary_sent = None           # 마지막 요약 발송 시각 (정각 기준)
+rate_buffer = []  # 최근 30분 환율 데이터 버퍼 [(timestamp, rate), ...]
 
 
 async def run_watcher():
@@ -41,11 +41,12 @@ async def run_watcher():
     prev_lower_level = 0
     last_scraped_date = None
 
-    # ✅ 이동평균선 상태를 메모리로 관리
+    # ✅ 이동평균선, 볼린저 상태 메모리 관리
     temp_state = {
-        "short_avg": None,
-        "long_avg": None,
-        "type": None,  # "golden" | "dead" | None
+        "short_avg": None,    # 단기 이동평균선
+        "long_avg": None,     # 장기 이동평균선
+        "type": None,         # "golden" | "dead" | None
+        "b_status": None,     # 볼린저 현재 상태
     }
 
     try:
@@ -53,12 +54,13 @@ async def run_watcher():
             try:
                 now = now_kst()
 
+                # ✅ 주말 정지 로직
                 if is_weekend():
                     print(f"[{now}] ⏸️ 주말, 알림 일시 정지 중...")
                     await asyncio.sleep(CHECK_INTERVAL)
                     continue
 
-                # ✅ 오전 11시대 스크랩
+                # ✅ 오전 11시대 예상 환율 레인지 스크랩
                 if is_scrape_time(last_scraped_date):
                     try:
                         result = fetch_expected_range()
@@ -82,19 +84,21 @@ async def run_watcher():
                 if rate:
                     print(f"[{now}] 📈 환율: {rate}")
                     await store_rate(conn, rate)
+
+                    # 최근 LONG_TERM_PERIOD(17시간) 환율 데이터
                     rates = await get_recent_rates(conn, LONG_TERM_PERIOD)
 
-                    # ✅ 되돌림 감지
+                    # ✅ 30분 내 반등/되돌림(예측 검증)
                     reversal_msgs = await check_breakout_reversals(conn, rate, now)
                     for r_msg in reversal_msgs:
                         await send_telegram(r_msg)
 
-                    # ✅ 전략별 분석
+                    # ✅ 개별 전략 분석
                     expected_range = await get_today_expected_range(conn)
                     e_msg = analyze_expected_range(rate, expected_range, now)
                     j_msg = analyze_jump(prev_rate, rate)
 
-                    # ✅ 크로스오버 분석
+                    # ✅ 이동평균선 크로스 분석
                     c_msg, temp_state["short_avg"], temp_state["long_avg"], temp_state["type"] = analyze_crossover(
                         rates=rates,
                         prev_short_avg=temp_state["short_avg"],
@@ -104,7 +108,7 @@ async def run_watcher():
                         current_price=rate
                     )
 
-                    # ✅ 볼린저 분석
+                    # ✅ 볼린저 밴드 분석
                     b_status, b_msgs, upper_streak, lower_streak, prev_upper_level, prev_lower_level = await analyze_bollinger(
                         conn=conn,
                         rates=rates,
@@ -114,9 +118,9 @@ async def run_watcher():
                         prev_lower=prev_lower_level,
                         cross_msg=c_msg,
                         jump_msg=j_msg,
-                        prev_status=temp_state.get("b_status")  # ✅ 추가
+                        prev_status=temp_state.get("b_status")
                     )
-                    temp_state["b_status"] = b_status
+                    temp_state["b_status"] = b_status  # 볼린저 상태 저장
 
                     # ✅ 개별 전략 메시지 수집
                     single_msgs = [msg for msg in [j_msg, c_msg, e_msg] if msg]
@@ -136,39 +140,48 @@ async def run_watcher():
                     )
 
                     if combo_result:
+                        # 콤보 발생 시 반복 레벨 갱신
                         prev_upper_level = combo_result["new_upper_level"]
                         prev_lower_level = combo_result["new_lower_level"]
                         await send_telegram(combo_result["message"])
                     else:
+                        # 콤보 없을 때 개별 전략 메시지 전송
                         for msg in single_msgs:
                             await send_telegram(msg)
 
                     # ✅ 이전 환율 갱신
                     prev_rate = rate
 
-                    # ✅ 30분 요약용 데이터 버퍼 업데이트
+                    # ✅ 30분 요약용 데이터 버퍼 관리 (최근 30분만 유지)
                     rate_buffer.append((now, rate))
-                    rate_buffer = [(t, r) for t, r in rate_buffer if (now - t).total_seconds() <= SUMMARY_INTERVAL]
+                    rate_buffer = [
+                        (t, r) for t, r in rate_buffer
+                        if (now - t).total_seconds() <= SUMMARY_INTERVAL
+                    ]
 
                     # ✅ 정시(00,30분) 요약 발송
-                    if (
-                        now.minute in (0, 30)
-                        and (last_summary_sent is None or (now - last_summary_sent).total_seconds() >= SUMMARY_INTERVAL)
-                    ):
-                        major_events = await get_recent_major_events(conn, now)
-                        summary_msg = generate_30min_summary(
-                            start_time=now - timedelta(seconds=SUMMARY_INTERVAL),
-                            end_time=now,
-                            rates=rate_buffer,
-                            major_events=major_events
-                        )
-                        await send_telegram(summary_msg)
+                    if now.minute in (0, 30) and now.second < (CHECK_INTERVAL // 2):
+                        # 마지막 발송이 동일 정시가 아닐 때만 전송
+                        rounded_now = now.replace(second=0, microsecond=0)
+                        if last_summary_sent != rounded_now:
+                            major_events = await get_recent_major_events(conn, now)
 
-                        chart_buf = generate_30min_chart(rate_buffer)
-                        if chart_buf:
-                            await send_photo(chart_buf)  # 그래프 이미지 전송
+                            # 30분 요약 메시지 생성
+                            summary_msg = generate_30min_summary(
+                                start_time=now - timedelta(seconds=SUMMARY_INTERVAL),
+                                end_time=now,
+                                rates=rate_buffer,
+                                major_events=major_events
+                            )
+                            await send_telegram(summary_msg)
 
-                        last_summary_sent = now
+                            # 30분 요약 차트 전송
+                            chart_buf = generate_30min_chart(rate_buffer)
+                            if chart_buf:
+                                await send_photo(chart_buf)
+
+                            # 마지막 발송 시각 기록
+                            last_summary_sent = rounded_now
 
                 else:
                     print(f"[{datetime.now()}] ❌ 환율 조회 실패")
@@ -181,6 +194,7 @@ async def run_watcher():
     finally:
         await close_db_connection(conn)
         print(f"[{datetime.now()}] 🛑 워처 종료, DB 연결 닫힘")
+
 
 
 if __name__ == "__main__":
