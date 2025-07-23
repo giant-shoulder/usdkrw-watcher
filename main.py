@@ -164,24 +164,29 @@ async def run_watcher():
                         # 마지막 발송이 동일 정시가 아닐 때만 전송
                         rounded_now = now.replace(second=0, microsecond=0)
                         if last_summary_sent != rounded_now:
-                            major_events = await get_recent_major_events(conn, now)
+                            try:
+                                major_events = await get_recent_major_events(conn, now)
 
-                            # 30분 요약 메시지 생성
-                            summary_msg = generate_30min_summary(
-                                start_time=now - timedelta(seconds=SUMMARY_INTERVAL),
-                                end_time=now,
-                                rates=rate_buffer,
-                                major_events=major_events
-                            )
-                            await send_telegram(summary_msg)
+                                # 30분 요약 메시지 생성
+                                summary_msg = generate_30min_summary(
+                                    start_time=now - timedelta(seconds=SUMMARY_INTERVAL),
+                                    end_time=now,
+                                    rates=rate_buffer,
+                                    major_events=major_events
+                                )
+                                await send_telegram(summary_msg)
 
-                            # 30분 요약 차트 전송
-                            chart_buf = generate_30min_chart(rate_buffer)
-                            if chart_buf:
-                                await send_photo(chart_buf)
+                                # 30분 요약 차트 전송
+                                chart_buf = generate_30min_chart(rate_buffer)
+                                if chart_buf:
+                                    await send_photo(chart_buf)
 
-                            # 마지막 발송 시각 기록
-                            last_summary_sent = rounded_now
+                                # 마지막 발송 시각 기록
+                                last_summary_sent = rounded_now
+                                print(f"[{now}] ✅ 운영 모드: 30분 요약 발송 완료 ({rounded_now.strftime('%H:%M')})")
+                            except Exception as e:
+                                print(f"[{now}] ❌ 30분 요약 발송 오류: {e}")    
+
 
                 else:
                     print(f"[{datetime.now()}] ❌ 환율 조회 실패")
