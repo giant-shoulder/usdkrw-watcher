@@ -66,10 +66,13 @@ async def run_watcher():
                     try:
                         result = fetch_expected_range()
                         msg = (
-                            "📊 *오늘의 예상 환율 레인지*\n"
-                            f"• 하단: *{result['low']:.2f}원*\n"
-                            f"• 상단: *{result['high']:.2f}원*\n"
-                            f"출처: {result['source']}"
+                            "📊 *오늘의 전문가 예상 환율 범위*\n\n"
+                            "📌 *주요 외환시장 전문 딜러 전망*\n"
+                            f"- 예상 하단: *{result['low']:.2f}원*\n"
+                            f"- 예상 상단: *{result['high']:.2f}원*\n\n"
+                            "💡 이 수치는 국내외 주요 은행과 외환 전문 딜러들이 제시한 전망으로,\n"
+                            "   오늘 환율 흐름을 가늠하는 *신뢰도 높은 참고 지표*입니다.\n"
+                            f"(출처: {result['source']})"
                         )
                         print(msg)
                         await store_expected_range(conn, now.date(), result["low"], result["high"], result["source"])
