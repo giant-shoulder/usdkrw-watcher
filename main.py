@@ -159,12 +159,10 @@ async def run_watcher():
                         if (now - t).total_seconds() <= SUMMARY_INTERVAL
                     ]
 
-                    # ✅ 정시(00,30분) 요약 발송
-                    # 현재 시간을 분 단위로 반올림(정각/30분에 근접 여부 판단)
+                    # ✅ 정시(00,30분) 요약 발송 (CHECK_INTERVAL 오차 허용)
                     target_minutes = [0, 30]
                     nearest_minute = min(target_minutes, key=lambda m: abs(now.minute - m))
 
-                    # 정각/30분 ±CHECK_INTERVAL/2 범위 내에 들어온 경우
                     if abs(now.minute - nearest_minute) * 60 + now.second <= (CHECK_INTERVAL // 2):
                         rounded_now = now.replace(minute=nearest_minute, second=0, microsecond=0)
 
@@ -180,8 +178,11 @@ async def run_watcher():
                                 await send_telegram(summary_msg)
 
                                 chart_buf = generate_30min_chart(rate_buffer)
-                                if chart_buf:
+                                if chart_buf and chart_buf.getbuffer().nbytes > 0:
                                     await send_photo(chart_buf)
+                                    print(f"[{now}] ✅ 차트 전송 완료 ({rounded_now.strftime('%H:%M')})")
+                                else:
+                                    print(f"[{now}] ⏸️ 차트 전송 건너뜀: 데이터 부족 또는 빈 이미지")
 
                                 last_summary_sent = rounded_now
                                 print(f"[{now}] ✅ 운영 모드: 30분 요약 발송 완료 ({rounded_now.strftime('%H:%M')})")

@@ -111,17 +111,24 @@ def generate_30min_summary(
         f"💡 *종합 해석*: {advice}"
     )
 
-def generate_30min_chart(rates: list[tuple[datetime, float]]) -> BytesIO:
+def generate_30min_chart(rates: list[tuple[datetime, float]]) -> BytesIO | None:
     """
     30분간 환율 추이 그래프 생성 (영문 only)
     - 상승=빨강, 하락=파랑, 횡보=회색
     - 첫 환율, 마지막 환율만 강조 표시
+    - 데이터 부족 시 None 반환
     """
-    if not rates:
+    if not rates or len(rates) < 2:
+        print("⏸️ 차트 생성 건너뜀: 데이터가 부족합니다.")
         return None
 
     times = [r[0].strftime("%H:%M") for r in rates]
     values = [r[1] for r in rates]
+
+    # 모든 값이 동일한 경우
+    if max(values) == min(values):
+        print("⏸️ 차트 생성 건너뜀: 모든 환율 값이 동일합니다.")
+        return None
 
     # ✅ 추세 색상
     if values[-1] > values[0]:
@@ -170,4 +177,6 @@ def generate_30min_chart(rates: list[tuple[datetime, float]]) -> BytesIO:
     plt.savefig(buf, format="png")
     buf.seek(0)
     plt.close()
+
+    print("✅ 차트 생성 완료 (데이터 {}건)".format(len(values)))
     return buf
