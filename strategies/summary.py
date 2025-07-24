@@ -45,6 +45,8 @@ async def get_recent_major_events(conn, current_time) -> list[str]:
     return events
 
 
+from statistics import stdev
+
 def generate_30min_summary(
     start_time: datetime,
     end_time: datetime,
@@ -52,52 +54,60 @@ def generate_30min_summary(
     major_events: list[str] = None
 ) -> str:
     """
-    30분 간 환율 요약 메시지 생성 (급락/급등 후 반등·조정 개선)
+    30분 간 환율 요약 메시지 생성 (표준편차 + 중간 변동 패턴 반영)
     """
     if not rates:
         return "⏱️ 최근 30분 데이터가 없습니다."
 
     sorted_rates = sorted(rates, key=lambda x: x[0])
-    start_rate = sorted_rates[0][1]
-    end_rate = sorted_rates[-1][1]
-    high = max(r[1] for r in sorted_rates)
-    low = min(r[1] for r in sorted_rates)
+    prices = [r[1] for r in sorted_rates]
+
+    start_rate = prices[0]
+    end_rate = prices[-1]
+    high = max(prices)
+    low = min(prices)
     diff = round(end_rate - start_rate, 2)
     band_width = round(high - low, 2)
-    volatility = classify_volatility(high, low)
 
-    # ✅ 최근 10분 기울기 계산
-    recent_rates = [r[1] for r in sorted_rates if (end_time - r[0]).total_seconds() <= 600]
-    recent_slope = (
-        round(recent_rates[-1] - recent_rates[0], 3) if len(recent_rates) >= 2 else 0.0
-    )
+    # ✅ 표준편차 기반 변동성
+    volatility_std = stdev(prices) if len(prices) > 1 else 0
+    if band_width < 0.5 and volatility_std < 0.05:
+        volatility = f"{band_width:.2f}원 (매우 좁은 변동성)"
+    elif band_width < 1.5 and volatility_std < 0.15:
+        volatility = f"{band_width:.2f}원 (보통 수준의 변동성)"
+    else:
+        volatility = f"{band_width:.2f}원 (상대적으로 넓은 변동성)"
 
-    # ✅ 세분화된 추세 분류
-    if band_width <= 0.2:
+    # ✅ 최근 10분 기울기 (단기 흐름 참고)
+    recent_prices = prices[-min(5, len(prices)):]  # 3분20초 간격 기준 약 10분
+    recent_slope = round((recent_prices[-1] - recent_prices[0]) / max(1, len(recent_prices) - 1), 3)
+
+    # ✅ 추세 분류 (패턴 + 기울기 반영)
+    if band_width <= 0.3:
         trend = "횡보"
-    elif diff > 0.05 and recent_slope < -0.05:
-        trend = "급등 후 조정"
-    elif diff < -0.05 and recent_slope > 0.05:
-        trend = "급락 후 단기 반등"
-    elif diff > 0.05:
+    elif diff > 0.2 and recent_slope > 0:
         trend = "상승"
-    elif diff < -0.05:
+    elif diff < -0.2 and recent_slope < 0:
         trend = "하락"
+    elif diff < 0 and high - end_rate > band_width * 0.6:
+        trend = "급등 후 조정"
+    elif diff > 0 and end_rate - low > band_width * 0.6:
+        trend = "급락 후 반등"
     else:
         trend = "혼조"
 
     # ✅ 주요 이벤트 요약
     events_text = "\n".join([f"- {e}" for e in major_events]) if major_events else "해당 없음"
 
-    # ✅ 종합 해석
+    # ✅ 종합 해석 (추세별)
     if trend == "상승":
         advice = "상승 흐름 유지 → 관망 후 소량 매수 고려"
     elif trend == "하락":
-        advice = "하락 흐름 유지 → 관망 권장"
+        advice = "하락 흐름 지속 → 관망 권장"
     elif trend == "급등 후 조정":
-        advice = "급등 이후 되돌림 진행 중 → 추세 전환 가능성 주의"
-    elif trend == "급락 후 단기 반등":
-        advice = "급락 이후 단기 반등 → 추세 지속 여부 확인 필요"
+        advice = "급등 후 되돌림 진행 중 → 추세 전환 가능성 주의"
+    elif trend == "급락 후 반등":
+        advice = "급락 후 단기 반등 → 지속 여부 확인 필요"
     elif trend == "혼조":
         advice = "단기 등락 반복 → 관망 우선"
     else:  # 횡보
