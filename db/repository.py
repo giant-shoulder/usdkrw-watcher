@@ -246,3 +246,19 @@ async def mark_breakout_resolved(conn, event_id: int) -> None:
         WHERE id = $1
     """
     await conn.execute(query, event_id)
+
+
+async def get_recent_rates_for_summary(conn, since: datetime) -> list[tuple[datetime, float]]:
+    """
+    최근 특정 시간 범위(예: 30분) 동안의 환율 데이터 조회
+    """
+    rows = await conn.fetch(
+        """
+        SELECT timestamp, rate
+        FROM rates
+        WHERE timestamp >= $1
+        ORDER BY timestamp ASC
+        """,
+        since
+    )
+    return [(r["timestamp"], r["rate"]) for r in rows]

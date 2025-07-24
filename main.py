@@ -1,6 +1,7 @@
 import asyncio
 from datetime import datetime, timedelta
 from config import CHECK_INTERVAL, ENVIRONMENT, LONG_TERM_PERIOD, SUMMARY_INTERVAL
+from db.repository import get_recent_rates_for_summary
 from strategies.summary import get_recent_major_events
 from strategies.utils.streak import get_streak_advisory
 from utils import is_weekend, now_kst, is_scrape_time
@@ -152,13 +153,6 @@ async def run_watcher():
                     # ✅ 이전 환율 갱신
                     prev_rate = rate
 
-                    # ✅ 30분 요약용 데이터 버퍼 관리 (최근 30분만 유지)
-                    rate_buffer.append((now, rate))
-                    rate_buffer = [
-                        (t, r) for t, r in rate_buffer
-                        if (now - t).total_seconds() <= SUMMARY_INTERVAL
-                    ]
-
                     # ✅ 정시(00,30분) 요약 발송 (CHECK_INTERVAL 오차 허용)
                     target_minutes = [0, 30]
                     nearest_minute = min(target_minutes, key=lambda m: abs(now.minute - m))
@@ -168,30 +162,42 @@ async def run_watcher():
 
                         if last_summary_sent != rounded_now:
                             try:
-                                major_events = await get_recent_major_events(conn, now)
-                                summary_msg = generate_30min_summary(
-                                    start_time=now - timedelta(seconds=SUMMARY_INTERVAL),
-                                    end_time=now,
-                                    rates=rate_buffer,
-                                    major_events=major_events
-                                )
-                                await send_telegram(summary_msg)
+                                # ✅ DB에서 최근 30분 데이터 조회
+                                since = now - timedelta(seconds=SUMMARY_INTERVAL)
+                                recent_rates = await get_recent_rates_for_summary(conn, since)
 
-                                chart_buf = generate_30min_chart(rate_buffer)
-                                if chart_buf and chart_buf.getbuffer().nbytes > 0:
-                                    await send_photo(chart_buf)
-                                    print(f"[{now}] ✅ 차트 전송 완료 ({rounded_now.strftime('%H:%M')})")
+                                if recent_rates:  # ✅ 데이터가 있을 경우에만 발송
+                                    major_events = await get_recent_major_events(conn, now)
+
+                                    # ✅ 요약 메시지 생성 및 발송
+                                    summary_msg = generate_30min_summary(
+                                        start_time=since,
+                                        end_time=now,
+                                        rates=recent_rates,
+                                        major_events=major_events
+                                    )
+                                    await send_telegram(summary_msg)
+
+                                    # ✅ 차트 생성 및 발송
+                                    chart_buf = generate_30min_chart(recent_rates)
+                                    if chart_buf and chart_buf.getbuffer().nbytes > 0:
+                                        await send_photo(chart_buf)
+                                        print(f"[{now}] ✅ 차트 전송 완료 ({rounded_now.strftime('%H:%M')})")
+                                    else:
+                                        print(f"[{now}] ⏸️ 차트 전송 건너뜀: 데이터 부족 또는 빈 이미지")
+
+                                    last_summary_sent = rounded_now
+                                    print(f"[{now}] ✅ 운영 모드: 30분 요약 발송 완료 ({rounded_now.strftime('%H:%M')})")
                                 else:
-                                    print(f"[{now}] ⏸️ 차트 전송 건너뜀: 데이터 부족 또는 빈 이미지")
+                                    print(f"[{now}] ⏸️ 30분 요약 발송 건너뜀: 최근 30분 데이터 없음")
 
-                                last_summary_sent = rounded_now
-                                print(f"[{now}] ✅ 운영 모드: 30분 요약 발송 완료 ({rounded_now.strftime('%H:%M')})")
                             except Exception as e:
                                 print(f"[{now}] ❌ 운영 모드: 요약 발송 실패 → {e}")
                         else:
                             print(f"[{now}] ⏸️ 운영 모드: 이미 {rounded_now.strftime('%H:%M')}에 발송됨, 건너뜀")
                     else:
                         print(f"[{now}] ⏸️ 운영 모드: 정각/30분 ±{CHECK_INTERVAL//2}초 범위 아님")
+
 
 
                 else:
