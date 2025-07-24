@@ -160,14 +160,17 @@ async def run_watcher():
                     ]
 
                     # ✅ 정시(00,30분) 요약 발송
-                    if now.minute in (0, 30) and now.second < (CHECK_INTERVAL // 2):
-                        # 마지막 발송이 동일 정시가 아닐 때만 전송
-                        rounded_now = now.replace(second=0, microsecond=0)
+                    # 현재 시간을 분 단위로 반올림(정각/30분에 근접 여부 판단)
+                    target_minutes = [0, 30]
+                    nearest_minute = min(target_minutes, key=lambda m: abs(now.minute - m))
+
+                    # 정각/30분 ±CHECK_INTERVAL/2 범위 내에 들어온 경우
+                    if abs(now.minute - nearest_minute) * 60 + now.second <= (CHECK_INTERVAL // 2):
+                        rounded_now = now.replace(minute=nearest_minute, second=0, microsecond=0)
+
                         if last_summary_sent != rounded_now:
                             try:
                                 major_events = await get_recent_major_events(conn, now)
-
-                                # 30분 요약 메시지 생성
                                 summary_msg = generate_30min_summary(
                                     start_time=now - timedelta(seconds=SUMMARY_INTERVAL),
                                     end_time=now,
@@ -176,16 +179,18 @@ async def run_watcher():
                                 )
                                 await send_telegram(summary_msg)
 
-                                # 30분 요약 차트 전송
                                 chart_buf = generate_30min_chart(rate_buffer)
                                 if chart_buf:
                                     await send_photo(chart_buf)
 
-                                # 마지막 발송 시각 기록
                                 last_summary_sent = rounded_now
                                 print(f"[{now}] ✅ 운영 모드: 30분 요약 발송 완료 ({rounded_now.strftime('%H:%M')})")
                             except Exception as e:
-                                print(f"[{now}] ❌ 30분 요약 발송 오류: {e}")    
+                                print(f"[{now}] ❌ 운영 모드: 요약 발송 실패 → {e}")
+                        else:
+                            print(f"[{now}] ⏸️ 운영 모드: 이미 {rounded_now.strftime('%H:%M')}에 발송됨, 건너뜀")
+                    else:
+                        print(f"[{now}] ⏸️ 운영 모드: 정각/30분 ±{CHECK_INTERVAL//2}초 범위 아님")
 
 
                 else:
