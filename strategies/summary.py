@@ -47,6 +47,8 @@ async def get_recent_major_events(conn, current_time) -> list[str]:
 
 from statistics import stdev
 
+from datetime import datetime, timedelta
+
 def generate_30min_summary(
     start_time: datetime,
     end_time: datetime,
@@ -54,12 +56,16 @@ def generate_30min_summary(
     major_events: list[str] = None
 ) -> str:
     """
-    30분 간 환율 요약 메시지 생성 (세분화된 추세 + 시각적 이모지 표현 포함)
+    30분 간 환율 요약 메시지 생성
+    - 추세 분석, 최근 10분 기울기, 변동폭 분석 포함
+    - 주요 이벤트와 종합 해석 제공
+    - 정각 기준 시간 범위 표기
     """
 
     if not rates:
         return "⏱️ 최근 30분 데이터가 없습니다."
 
+    # 📌 데이터 정렬 및 기초 통계
     sorted_rates = sorted(rates, key=lambda x: x[0])
     start_rate = sorted_rates[0][1]
     end_rate = sorted_rates[-1][1]
@@ -68,14 +74,11 @@ def generate_30min_summary(
     diff = round(end_rate - start_rate, 2)
     band_width = round(high - low, 2)
 
-    # ✅ 10분 기울기 계산
+    # 📉 최근 10분 기울기
     ten_min_rates = [r for r in sorted_rates if (sorted_rates[-1][0] - r[0]).total_seconds() <= 600]
-    if len(ten_min_rates) >= 2:
-        slope_10min = round(ten_min_rates[-1][1] - ten_min_rates[0][1], 3)
-    else:
-        slope_10min = 0.0
+    slope_10min = round(ten_min_rates[-1][1] - ten_min_rates[0][1], 3) if len(ten_min_rates) >= 2 else 0.0
 
-    # ✅ 변동폭 해석
+    # 📊 변동폭 해석
     if band_width >= 3.0:
         volatility = f"{band_width:.2f}원 (상대적으로 넓은 변동성)"
     elif band_width >= 1.5:
@@ -83,7 +86,7 @@ def generate_30min_summary(
     else:
         volatility = f"{band_width:.2f}원 (좁은 변동성)"
 
-    # ✅ 추세 분류
+    # 📈 추세 분류
     high_diff = round(high - end_rate, 2)
     low_diff = round(end_rate - low, 2)
 
@@ -100,7 +103,7 @@ def generate_30min_summary(
     else:
         trend = "혼조"
 
-    # ✅ 추세별 이모지
+    # 🧭 추세별 이모지
     trend_emojis = {
         "상승": "📈",
         "하락": "📉",
@@ -111,25 +114,26 @@ def generate_30min_summary(
     }
     trend_emoji = trend_emojis.get(trend, "📊")
 
-    # ✅ 종합 해석
-    if trend == "상승":
-        advice = "상승 흐름 유지 → 관망 후 소량 매수 고려"
-    elif trend == "하락":
-        advice = "하락 흐름 유지 → 관망 권장"
-    elif trend == "급등 후 조정":
-        advice = "급등 후 되돌림 진행 중 → 추세 전환 가능성 주의"
-    elif trend == "급락 후 반등":
-        advice = "급락 후 단기 반등 → 추세 지속 여부 확인 필요"
-    elif trend == "혼조":
-        advice = "단기 등락 반복 → 관망 우선"
-    else:  # 횡보
-        advice = "변동성 낮음 → 관망 유지"
+    # 💡 종합 해석
+    advice_map = {
+        "상승": "상승 흐름 유지 → 관망 후 소량 매수 고려",
+        "하락": "하락 흐름 유지 → 관망 권장",
+        "급등 후 조정": "급등 후 되돌림 진행 중 → 추세 전환 가능성 주의",
+        "급락 후 반등": "급락 후 단기 반등 → 추세 지속 여부 확인 필요",
+        "혼조": "단기 등락 반복 → 관망 우선",
+        "횡보": "변동성 낮음 → 관망 유지"
+    }
+    advice = advice_map[trend]
 
-    # ✅ 주요 이벤트 정리
-    events_text = "\n".join([f"- {e}" for e in major_events]) if major_events else "해당 없음"
+    # 📝 주요 이벤트 정리
+    events_text = "\n".join(f"- {e}" for e in major_events) if major_events else "해당 없음"
+
+    # 🕒 시간 범위: 정각 기준으로 반올림 처리
+    rounded_start = start_time.replace(minute=0 if start_time.minute < 30 else 30, second=0, microsecond=0)
+    rounded_end = rounded_start + timedelta(minutes=30)
 
     return (
-        f"⏱️ *최근 30분 환율 요약 ({start_time.strftime('%H:%M')} ~ {end_time.strftime('%H:%M')})*\n\n"
+        f"⏱️ *최근 30분 환율 요약 ({rounded_start.strftime('%H:%M')} ~ {rounded_end.strftime('%H:%M')})*\n\n"
         f"{trend_emoji} *추세*: {trend}\n"
         f"- 30분 전: {start_rate:.2f} → 현재: {end_rate:.2f}원 "
         f"({'+' if diff > 0 else ''}{diff:.2f}원, 최근10분 기울기 {slope_10min:+.3f})\n\n"
@@ -138,6 +142,7 @@ def generate_30min_summary(
         f"📌 *주요 이벤트*\n{events_text}\n\n"
         f"💡 *종합 해석*: {advice}"
     )
+
 
 
 
