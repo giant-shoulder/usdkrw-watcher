@@ -1,11 +1,9 @@
 from datetime import datetime, timedelta
-from statistics import mean
+from statistics import mean, stdev
 from config import MOVING_AVERAGE_PERIOD
 from io import BytesIO
-import matplotlib
-matplotlib.use("Agg")
+from datetime import datetime
 import matplotlib.pyplot as plt
-import matplotlib.font_manager as fm
 
 
 def classify_volatility(high: float, low: float) -> str:
@@ -45,10 +43,6 @@ async def get_recent_major_events(conn, current_time) -> list[str]:
     return events
 
 
-from statistics import stdev
-
-from datetime import datetime, timedelta
-
 def generate_30min_summary(
     start_time: datetime,
     end_time: datetime,
@@ -59,7 +53,6 @@ def generate_30min_summary(
     30분 간 환율 요약 메시지 생성
     - 추세 분석, 최근 10분 기울기, 변동폭 분석 포함
     - 주요 이벤트와 종합 해석 제공
-    - 정각 기준 시간 범위 표기
     """
 
     if not rates:
@@ -128,14 +121,8 @@ def generate_30min_summary(
     # 📝 주요 이벤트 정리
     events_text = "\n".join(f"- {e}" for e in major_events) if major_events else "해당 없음"
 
-    # 정확한 30분 블록 계산
-    minute = (end_time.minute // 30) * 30
-    rounded_end = end_time.replace(minute=minute, second=0, microsecond=0)
-    rounded_start = rounded_end - timedelta(minutes=30)
-
-
     return (
-        f"⏱️ *최근 30분 환율 요약 ({rounded_start.strftime('%H:%M')} ~ {rounded_end.strftime('%H:%M')})*\n\n"
+        f"⏱️ *최근 30분 환율 요약 ({start_time.strftime('%H:%M')} ~ {end_time.strftime('%H:%M')})*\n\n"
         f"{trend_emoji} *추세*: {trend}\n"
         f"- 30분 전: {start_rate:.2f} → 현재: {end_rate:.2f}원 "
         f"({'+' if diff > 0 else ''}{diff:.2f}원, 최근10분 기울기 {slope_10min:+.3f})\n\n"
@@ -150,11 +137,13 @@ def generate_30min_summary(
 
 def generate_30min_chart(rates: list[tuple[datetime, float]]) -> BytesIO | None:
     """
-    30분간 환율 추이 그래프 생성 (영문 only)
-    - 상승=빨강, 하락=파랑, 횡보=회색
-    - 첫 환율, 마지막 환율만 강조 표시
+    30분간 USD/KRW 환율 추이 그래프 생성
+    - 상승: 빨강, 하락: 파랑, 횡보: 회색
+    - 시작/종료 시점 강조 표시
     - 데이터 부족 시 None 반환
     """
+
+    # ✅ 데이터 유효성 검사
     if not rates or len(rates) < 2:
         print("⏸️ 차트 생성 건너뜀: 데이터가 부족합니다.")
         return None
@@ -162,58 +151,48 @@ def generate_30min_chart(rates: list[tuple[datetime, float]]) -> BytesIO | None:
     times = [r[0].strftime("%H:%M") for r in rates]
     values = [r[1] for r in rates]
 
-    # 모든 값이 동일한 경우
+    # ✅ 모든 값이 동일한 경우 (차트는 생성하지만 경고 표시)
     if max(values) == min(values):
-        print("⏸️ 차트 생성 건너뜀: 모든 환율 값이 동일합니다.")
-        return None
+        print("⚠️ 모든 환율 값이 동일합니다 – 평평한 차트가 생성됩니다.")
 
-    # ✅ 추세 색상
+    # ✅ 추세에 따른 색상 설정
     if values[-1] > values[0]:
-        color = "red"
+        color = "red"  # 상승
     elif values[-1] < values[0]:
-        color = "blue"
+        color = "blue"  # 하락
     else:
-        color = "gray"
+        color = "gray"  # 횡보
 
+    # ✅ 포인트 주석 함수 정의
+    def annotate_point(x, y, label, align="right"):
+        ha = "right" if align == "right" else "left"
+        size = 60 if align == "right" else 80
+        plt.scatter(x, y, color=color, s=size, edgecolors="black", zorder=5)
+        plt.text(
+            x, y, f"{label:.2f}", fontsize=9, color="black", ha=ha, va="bottom",
+            bbox=dict(facecolor="white", edgecolor="gray", boxstyle="round,pad=0.2")
+        )
+
+    # ✅ 차트 그리기
     plt.figure(figsize=(6, 3))
     plt.plot(times, values, marker="o", linewidth=2, color=color)
     plt.xticks(rotation=45)
-    plt.title("USD/KRW Last 30 min")
+    plt.title("USD/KRW Last 30 min")  # 영어 제목 유지
     plt.xlabel("Time")
     plt.ylabel("KRW")
     plt.grid(True)
 
-    # ✅ 첫 환율(시작점) 강조
-    plt.scatter(times[0], values[0], color=color, s=60, edgecolors="black", zorder=5)
-    plt.text(
-        times[0],
-        values[0],
-        f"{values[0]:.2f}",
-        fontsize=8,
-        color="black",
-        ha="right",
-        va="bottom",
-        bbox=dict(facecolor="white", edgecolor="gray", boxstyle="round,pad=0.2")
-    )
+    # ✅ 시작점, 종료점 강조
+    annotate_point(times[0], values[0], values[0], align="right")
+    annotate_point(times[-1], values[-1], values[-1], align="left")
 
-    # ✅ 마지막 환율(현재가) 강조
-    plt.scatter(times[-1], values[-1], color=color, s=80, edgecolors="black", zorder=5)
-    plt.text(
-        times[-1],
-        values[-1],
-        f"{values[-1]:.2f}",
-        fontsize=9,
-        color="black",
-        ha="left",
-        va="bottom",
-        bbox=dict(facecolor="white", edgecolor="gray", boxstyle="round,pad=0.2")
-    )
-
+    # ✅ 메모리 버퍼에 저장
     buf = BytesIO()
     plt.tight_layout()
-    plt.savefig(buf, format="png")
+    plt.savefig(buf, format="png", bbox_inches="tight")
     buf.seek(0)
     plt.close()
 
-    print("✅ 차트 생성 완료 (데이터 {}건)".format(len(values)))
+    print(f"✅ 차트 생성 완료 (데이터 {len(values)}건)")
     return buf
+

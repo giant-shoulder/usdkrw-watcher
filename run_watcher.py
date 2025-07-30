@@ -20,6 +20,7 @@ from strategies import (
     generate_30min_summary,
     generate_30min_chart
 )
+from utils.time import get_recent_completed_30min_block
 
 # 글로벌 상태 변수
 last_summary_sent = None
@@ -148,23 +149,21 @@ async def run_watcher(db_pool):
                         prev_rate = rate
 
                         # ✅ 30분 요약 및 그래프 생성 시점 판별
-                        target_minutes = [0, 30]
-                        nearest_minute = min(target_minutes, key=lambda m: abs(now.minute - m))
+                        block_start, block_end = get_recent_completed_30min_block(now)
 
-                        if abs(now.minute - nearest_minute) * 60 + now.second <= (CHECK_INTERVAL // 2):
-                            rounded_now = now.replace(minute=nearest_minute, second=0, microsecond=0)
-
-                            if last_summary_sent != rounded_now:
+                        # CHECK_INTERVAL 절반 이내일 때만 요약 수행
+                        elapsed_sec = abs((now - block_end).total_seconds())
+                        if elapsed_sec <= (CHECK_INTERVAL // 2):
+                            if last_summary_sent != block_end:
                                 try:
-                                    since = now - timedelta(seconds=SUMMARY_INTERVAL)
-                                    recent_rates = await get_recent_rates_for_summary(conn, since)
+                                    recent_rates = await get_recent_rates_for_summary(conn, block_start)
 
                                     if recent_rates:
                                         major_events = await get_recent_major_events(conn, now)
 
                                         summary_msg = generate_30min_summary(
-                                            start_time=since,
-                                            end_time=now,
+                                            start_time=block_start,
+                                            end_time=block_end,
                                             rates=recent_rates,
                                             major_events=major_events
                                         )
@@ -173,20 +172,20 @@ async def run_watcher(db_pool):
                                         chart_buf = generate_30min_chart(recent_rates)
                                         if chart_buf and chart_buf.getbuffer().nbytes > 0:
                                             await send_photo(chart_buf)
-                                            print(f"[{now}] ✅ 차트 전송 완료 ({rounded_now.strftime('%H:%M')})")
+                                            print(f"[{now}] ✅ 차트 전송 완료 ({block_end.strftime('%H:%M')})")
                                         else:
-                                            print(f"[{now}] ⏸️ 차트 전송 취소: 데이터 부족")
+                                            print(f"[{now}] ⏸️ 차트 전송 취소: 데이터 부족 또는 생성 실패")
 
-                                        last_summary_sent = rounded_now
-                                        print(f"[{now}] ✅ 30분 요약 메시지 발송 완료 ({rounded_now.strftime('%H:%M')})")
+                                        last_summary_sent = block_end
+                                        print(f"[{now}] ✅ 30분 요약 메시지 발송 완료 ({block_start.strftime('%H:%M')} ~ {block_end.strftime('%H:%M')})")
                                     else:
-                                        print(f"[{now}] ⏸️ 30분 요약 생략: 그리고 보내지 않음")
+                                        print(f"[{now}] ⏸️ 30분 요약 생략: 최근 데이터 부족")
                                 except Exception as e:
                                     print(f"[{now}] ❌ 요약 발송 실패: {e}")
                             else:
-                                print(f"[{now}] ⏸️ 이미 {rounded_now.strftime('%H:%M')} 에 발송됨, 생략")
+                                print(f"[{now}] ⏸️ 이미 {block_end.strftime('%H:%M')} 블록 발송 완료, 생략")
                         else:
-                            print(f"[{now}] ⏸️ 요약 발송 시간 조건 무효")
+                            print(f"[{now}] ⏸️ 요약 조건 미충족 (block_end={block_end.strftime('%H:%M')}, now={now.strftime('%H:%M:%S')})")
                     else:
                         print(f"[{now}] ❌ 환율 조회 실패")
 

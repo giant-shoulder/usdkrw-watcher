@@ -1,4 +1,4 @@
-from datetime import datetime, time, date
+from datetime import datetime, time, date, timedelta
 import pytz
 from config import ENVIRONMENT
 
@@ -70,3 +70,38 @@ def is_scrape_time(last_scraped: date | None = None) -> bool:
         if last_scraped is None or last_scraped != today:
             return True
     return False
+
+
+def get_recent_completed_30min_block(now: datetime) -> tuple[datetime, datetime]:
+    """
+    현재 시각 기준으로 가장 최근 완료된 30분 블록 반환
+
+    예:
+    - now = 15:29 → (15:00 ~ 15:30)
+    - now = 15:31 → (15:00 ~ 15:30) ← 15:30 ~ 16:00은 아직 미완료
+    - now = 00:05 → (23:30 ~ 00:00)
+    """
+    minute = now.minute
+    hour = now.hour
+    date = now.date()
+
+    if minute < 30:
+        end_minute = 0
+        end_hour = hour
+    else:
+        end_minute = 30
+        end_hour = hour
+
+    end = datetime.combine(date, datetime.min.time()).replace(hour=end_hour, minute=end_minute)
+    if minute < 30:
+        end -= timedelta(minutes=0)
+    else:
+        end += timedelta(minutes=0)
+
+    start = end - timedelta(minutes=30)
+    if end > now:
+        # 만약 미래 시간일 경우, 한 블록 뒤로 이동
+        end -= timedelta(minutes=30)
+        start -= timedelta(minutes=30)
+
+    return start, end
