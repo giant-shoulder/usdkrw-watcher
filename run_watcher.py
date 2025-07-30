@@ -158,8 +158,8 @@ async def run_watcher(db_pool):
                         # 현재 시각과 가장 최근 완료된 block_end 사이의 차이 계산
                         elapsed_sec = abs((current - block_end).total_seconds())
 
-                        # CHECK_INTERVAL 절반 이내일 때만 요약 수행
-                        if elapsed_sec <= (CHECK_INTERVAL // 2):
+                        # ✅ 종료된 블록 기준으로, 최대 5분 이내일 때 발송 허용
+                        if 0 <= elapsed_sec <= 300:
                             if last_summary_sent != block_end:
                                 try:
                                     # 정확한 블록 범위 기준으로 데이터 조회
