@@ -54,6 +54,15 @@ async def send_photo(photo_buf, caption: str | None = None, target_chat_ids: lis
 
     recipients = target_chat_ids if target_chat_ids else CHAT_IDS
 
+    # ✅ 버퍼 비어 있는 경우 체크
+    size = photo_buf.getbuffer().nbytes
+    if size == 0:
+        print("❌ 전송 취소: 버퍼가 비어 있음")
+        return
+
+    # ✅ 항상 시작 위치로 이동
+    photo_buf.seek(0)
+
     for cid in recipients:
         try:
             await bot.send_photo(
