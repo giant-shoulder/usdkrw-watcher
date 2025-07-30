@@ -85,23 +85,20 @@ def get_recent_completed_30min_block(now: datetime) -> tuple[datetime, datetime]
     hour = now.hour
     date = now.date()
 
-    if minute < 30:
-        end_minute = 0
-        end_hour = hour
-    else:
-        end_minute = 30
-        end_hour = hour
+    # ✅ tz-aware datetime 생성
+    base = datetime.combine(date, time.min).replace(tzinfo=TIMEZONE)
 
-    end = datetime.combine(date, datetime.min.time()).replace(hour=end_hour, minute=end_minute)
     if minute < 30:
-        end -= timedelta(minutes=0)
+        end = base.replace(hour=hour, minute=0)
     else:
-        end += timedelta(minutes=0)
+        end = base.replace(hour=hour, minute=30)
 
     start = end - timedelta(minutes=30)
+
+    # ✅ future block 처리
     if end > now:
-        # 만약 미래 시간일 경우, 한 블록 뒤로 이동
         end -= timedelta(minutes=30)
         start -= timedelta(minutes=30)
 
     return start, end
+
