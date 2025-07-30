@@ -148,11 +148,15 @@ async def run_watcher(db_pool):
 
                         prev_rate = rate
 
-                        # ✅ 30분 요약 및 그래프 생성 시점 판별
-                        block_start, block_end = get_recent_completed_30min_block(now)
+                        # ✅ 현재 시각 확보 (로그 및 elapsed 시간 출력용)
+                        now = now_kst()
 
-                        # 현재 시간과 가장 최근 완료된 block_end 사이의 차이 계산
-                        elapsed_sec = abs((now - block_end).total_seconds())
+                        # ✅ 30분 요약 및 그래프 생성 시점 판별 (항상 최신 시각 기준으로 블록 계산)
+                        current = now_kst()
+                        block_start, block_end = get_recent_completed_30min_block(current)
+
+                        # 현재 시각과 가장 최근 완료된 block_end 사이의 차이 계산
+                        elapsed_sec = abs((current - block_end).total_seconds())
 
                         # CHECK_INTERVAL 절반 이내일 때만 요약 수행
                         if elapsed_sec <= (CHECK_INTERVAL // 2):
@@ -189,6 +193,7 @@ async def run_watcher(db_pool):
                                 print(f"[{now}] ⏸️ 이미 {block_end.strftime('%H:%M')} 블록 발송 완료, 생략")
                         else:
                             print(f"[{now}] ⏸️ 요약 조건 미충족 (block_end={block_end.strftime('%H:%M')}, now={now.strftime('%H:%M:%S')})")
+
 
                     else:
                         print(f"[{now}] ❌ 환율 조회 실패")
