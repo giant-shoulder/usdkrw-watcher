@@ -128,10 +128,11 @@ def generate_30min_summary(
     # 📝 주요 이벤트 정리
     events_text = "\n".join(f"- {e}" for e in major_events) if major_events else "해당 없음"
 
-    # 🕒 시간 범위: end_time 기준 반올림하여 직전 30분
-    minute_block = 30 if end_time.minute < 30 else 0
-    rounded_end = end_time.replace(minute=minute_block, second=0, microsecond=0) + timedelta(minutes=30)
+    # 정확한 30분 블록 계산
+    minute = (end_time.minute // 30) * 30
+    rounded_end = end_time.replace(minute=minute, second=0, microsecond=0)
     rounded_start = rounded_end - timedelta(minutes=30)
+
 
     return (
         f"⏱️ *최근 30분 환율 요약 ({rounded_start.strftime('%H:%M')} ~ {rounded_end.strftime('%H:%M')})*\n\n"
