@@ -262,3 +262,19 @@ async def get_recent_rates_for_summary(conn, since: datetime) -> list[tuple[date
         since
     )
     return [(r["timestamp"], r["rate"]) for r in rows]
+
+
+async def get_rates_in_block(conn, start: datetime, end: datetime) -> list[tuple[datetime, float]]:
+    """
+    지정된 시작~종료 시간 블록 내 환율 데이터 조회
+    """
+    rows = await conn.fetch(
+        """
+        SELECT timestamp, rate
+        FROM rates
+        WHERE timestamp >= $1 AND timestamp < $2
+        ORDER BY timestamp ASC
+        """,
+        start, end
+    )
+    return [(r["timestamp"], r["rate"]) for r in rows]

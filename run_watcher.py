@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 
 from config import CHECK_INTERVAL, ENVIRONMENT, LONG_TERM_PERIOD, SUMMARY_INTERVAL
 from db.repository import (
-    store_rate, get_recent_rates, store_expected_range,
+    get_rates_in_block, store_rate, get_recent_rates, store_expected_range,
     get_today_expected_range, get_recent_rates_for_summary
 )
 from strategies.summary import get_recent_major_events
@@ -151,15 +151,18 @@ async def run_watcher(db_pool):
                         # ✅ 30분 요약 및 그래프 생성 시점 판별
                         block_start, block_end = get_recent_completed_30min_block(now)
 
-                        # CHECK_INTERVAL 절반 이내일 때만 요약 수행
+                        # 현재 시간과 가장 최근 완료된 block_end 사이의 차이 계산
                         elapsed_sec = abs((now - block_end).total_seconds())
+
+                        # CHECK_INTERVAL 절반 이내일 때만 요약 수행
                         if elapsed_sec <= (CHECK_INTERVAL // 2):
                             if last_summary_sent != block_end:
                                 try:
-                                    recent_rates = await get_recent_rates_for_summary(conn, block_start)
+                                    # 정확한 블록 범위 기준으로 데이터 조회
+                                    recent_rates = await get_rates_in_block(conn, block_start, block_end)
 
                                     if recent_rates:
-                                        major_events = await get_recent_major_events(conn, now)
+                                        major_events = await get_recent_major_events(conn, block_end)
 
                                         summary_msg = generate_30min_summary(
                                             start_time=block_start,
@@ -186,6 +189,7 @@ async def run_watcher(db_pool):
                                 print(f"[{now}] ⏸️ 이미 {block_end.strftime('%H:%M')} 블록 발송 완료, 생략")
                         else:
                             print(f"[{now}] ⏸️ 요약 조건 미충족 (block_end={block_end.strftime('%H:%M')}, now={now.strftime('%H:%M:%S')})")
+
                     else:
                         print(f"[{now}] ❌ 환율 조회 실패")
 
