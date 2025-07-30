@@ -4,6 +4,7 @@ from config import MOVING_AVERAGE_PERIOD
 from io import BytesIO
 from datetime import datetime
 import matplotlib.pyplot as plt
+from pytz import timezone
 
 
 def classify_volatility(high: float, low: float) -> str:
@@ -148,7 +149,9 @@ def generate_30min_chart(rates: list[tuple[datetime, float]]) -> BytesIO | None:
         print("⏸️ 차트 생성 건너뜀: 데이터가 부족합니다.")
         return None
 
-    times = [r[0].strftime("%H:%M") for r in rates]
+    KST = timezone("Asia/Seoul")
+
+    times = [r[0].astimezone(KST).strftime("%H:%M") for r in rates]
     values = [r[1] for r in rates]
 
     # ✅ 모든 값이 동일한 경우 (차트는 생성하지만 경고 표시)

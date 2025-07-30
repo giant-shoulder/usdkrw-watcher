@@ -74,31 +74,48 @@ def is_scrape_time(last_scraped: date | None = None) -> bool:
 
 def get_recent_completed_30min_block(now: datetime) -> tuple[datetime, datetime]:
     """
-    현재 시각 기준으로 가장 최근 완료된 30분 블록 반환
+    현재 시각 기준으로 가장 최근 '완료된' 30분 블록 반환
+    - 기준: 각 블록의 end 시각 ±120초(2분 0초) 안에 now가 도달하면 완료로 간주
+    - 또는 end + threshold 이후까지 도달했으면 다음 블록이 완료된 것으로 판단
 
     예:
-    - now = 15:29 → (15:00 ~ 15:30)
-    - now = 15:31 → (15:00 ~ 15:30) ← 15:30 ~ 16:00은 아직 미완료
-    - now = 00:05 → (23:30 ~ 00:00)
+    - now = 15:28:00 → (15:00 ~ 15:30)
+    - now = 15:31:00 → (15:00 ~ 15:30)
+    - now = 15:33:00 → (15:30 ~ 16:00)
     """
+    threshold_sec = 120
+
+    # ✅ tz-aware 자정 기준
+    base = datetime.combine(now.date(), time.min).replace(tzinfo=TIMEZONE)
     minute = now.minute
     hour = now.hour
-    date = now.date()
 
-    # ✅ tz-aware datetime 생성
-    base = datetime.combine(date, time.min).replace(tzinfo=TIMEZONE)
-
+    # 가장 가까운 0분 or 30분 end 시각 후보
     if minute < 30:
-        end = base.replace(hour=hour, minute=0)
+        candidate_end = base.replace(hour=hour, minute=30)
     else:
-        end = base.replace(hour=hour, minute=30)
+        candidate_end = base.replace(hour=(hour + 1) % 24, minute=0)
+        if hour == 23:
+            candidate_end += timedelta(days=1)
 
-    start = end - timedelta(minutes=30)
+    # now가 threshold 범위 안이면 이 블록을 완료로 판단
+    time_diff = (now - candidate_end).total_seconds()
 
-    # ✅ future block 처리
-    if end > now:
-        end -= timedelta(minutes=30)
-        start -= timedelta(minutes=30)
+    if abs(time_diff) <= threshold_sec:
+        start = candidate_end - timedelta(minutes=30)
+        return start, candidate_end
 
-    return start, end
+    elif time_diff > threshold_sec:
+        # 이미 다음 블록도 완료됨
+        next_end = candidate_end + timedelta(minutes=30)
+        start = next_end - timedelta(minutes=30)
+        return start, next_end
+
+    else:
+        # 아직 블록 종료 기준에 도달하지 않음 → 전 블록 반환
+        end = candidate_end - timedelta(minutes=30)
+        start = end - timedelta(minutes=30)
+        return start, end
+
+
 
