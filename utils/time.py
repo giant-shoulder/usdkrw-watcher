@@ -85,8 +85,7 @@ def get_recent_completed_30min_block(now: datetime) -> tuple[datetime, datetime]
     """
     threshold_sec = 120
 
-    # ✅ tz-aware 자정 기준
-    base = datetime.combine(now.date(), time.min).replace(tzinfo=TIMEZONE)
+    base = TIMEZONE.localize(datetime.combine(now.date(), time.min))  # ✅ 안전한 tz-aware
     minute = now.minute
     hour = now.hour
 
