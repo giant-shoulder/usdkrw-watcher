@@ -155,8 +155,9 @@ async def run_watcher(db_pool):
                         current = now_kst()
                         block_start, block_end = get_recent_completed_30min_block(current)
 
-                        # 현재 시각과 가장 최근 완료된 block_end 사이의 차이 계산
-                        elapsed_sec = abs((current - block_end).total_seconds())
+                        # ✅ block_end 기준 ±120초 내 도달 여부 판단
+                        elapsed_sec = (current - block_end).total_seconds()
+                        print(f"[{now}] ⏳ 블록 판단 시점: {current}, ⏳ 블록 종료 시점: {block_end}, elapsed_sec: {elapsed_sec:.1f}초")
 
                         # block_end 기준 ±1분 40초 내에서만 수행
                         if -120 <= elapsed_sec <= 120:
