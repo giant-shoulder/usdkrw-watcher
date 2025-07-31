@@ -159,7 +159,7 @@ async def run_watcher(db_pool):
                         elapsed_sec = abs((current - block_end).total_seconds())
 
                         # block_end 기준 ±1분 40초 내에서만 수행
-                        if -100 <= elapsed_sec <= 100:
+                        if -120 <= elapsed_sec <= 120:
                             if last_summary_sent != block_end:
                                 try:
                                     # 정확한 블록 범위 기준으로 데이터 조회
