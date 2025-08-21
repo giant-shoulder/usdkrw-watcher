@@ -139,6 +139,11 @@ def analyze_combo(
         else:
             structs[key] = _to_struct(msg)
 
+    # 🔒 단일 신호일 때는 콤보 판단(매수/매도)을 내리지 않음 → 개별 신호만 발송
+    active_nonzero = [k for k, (d, c, _e) in structs.items() if d != 0 and c > 0]
+    if len(active_nonzero) < 2:
+        return None
+
     # 가중 합산 스코어 (-1..+1)
     raw = 0.0
     total_w = 0.0
@@ -153,8 +158,7 @@ def analyze_combo(
     if len(dirs) >= 2 and (min(dirs) < 0 < max(dirs)):
         signed *= 0.7
 
-    # 활성 기여 신호 및 합의 정도
-    active_nonzero = [k for k, (d, c, _e) in structs.items() if d != 0 and c > 0]
+    # 합의 정도 파악 (방향 일치 수)
     pos = sum(1 for (d, _c, _e) in structs.values() if d > 0)
     neg = sum(1 for (d, _c, _e) in structs.values() if d < 0)
     agree_count = max(pos, neg)
