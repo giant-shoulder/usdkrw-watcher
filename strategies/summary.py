@@ -142,7 +142,7 @@ def generate_30min_summary(
     # 📝 주요 이벤트 정리
     events_text = "\n".join(f"- {e}" for e in major_events) if major_events else "해당 없음"
 
-    gauge = make_score_gauge(trend, diff, slope_10min, band_width)
+    gauge = make_score_gauge(trend, diff)
     return (
         f"⏱️ *최근 30분 환율 요약 ({start_time.strftime('%H:%M')} ~ {end_time.strftime('%H:%M')})*\n\n"
         f"{trend_emoji} *추세*: {trend}\n"
