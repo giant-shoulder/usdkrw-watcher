@@ -33,12 +33,13 @@ def analyze_crossover(
     - 변화 없으면 1시간마다 리마인드
     """
     if len(rates) < LONG_TERM_PERIOD:
-        return None, prev_short_avg, prev_long_avg, prev_signal_type
+        return None, prev_short_avg, prev_long_avg, prev_signal_type, None
 
     short_ma = mean(rates[-SHORT_TERM_PERIOD:])
     long_ma = mean(rates[-LONG_TERM_PERIOD:])
     spread_now = short_ma - long_ma
     now = now_kst()
+    struct_signal = None
 
     # 의미있는 전환 판정: 부호 변환 + 스프레드 크기 + 가격 조건
     spread_prev = None
@@ -82,7 +83,7 @@ def analyze_crossover(
         _confirm_counts["golden"] += 1
         _confirm_counts["dead"] = 0
         if _confirm_counts["golden"] < CONFIRM_BARS:
-            return None, short_ma, long_ma, "golden"
+            return None, short_ma, long_ma, "golden", None
 
         signal_type = "golden"
         signal = (
@@ -91,6 +92,17 @@ def analyze_crossover(
             f"📎 스프레드: {spread_now:.2f}, 가격-장기MA: {(current_price - long_ma) if current_price else 0:+.2f}\n"
             "💡 *매수(상승) 시그널입니다.*"
         )
+        struct_signal = {
+            "key": "cross",
+            "direction": +1,
+            "confidence": 0.9,
+            "evidence": "골든크로스 확정",
+            "meta": {
+                "spread": float(f"{spread_now:.2f}"),
+                "price_minus_long": float(f"{(current_price - long_ma) if current_price else 0:.2f}"),
+                "type": "golden",
+            },
+        }
         last_report_time["golden"] = now
 
     elif crossed_down:
@@ -98,7 +110,7 @@ def analyze_crossover(
         _confirm_counts["dead"] += 1
         _confirm_counts["golden"] = 0
         if _confirm_counts["dead"] < CONFIRM_BARS:
-            return None, short_ma, long_ma, "dead"
+            return None, short_ma, long_ma, "dead", None
 
         signal_type = "dead"
         signal = (
@@ -107,6 +119,17 @@ def analyze_crossover(
             f"📎 스프레드: {spread_now:.2f}, 가격-장기MA: {(current_price - long_ma) if current_price else 0:+.2f}\n"
             "💡 *매도(하락) 시그널입니다.*"
         )
+        struct_signal = {
+            "key": "cross",
+            "direction": -1,
+            "confidence": 0.9,
+            "evidence": "데드크로스 확정",
+            "meta": {
+                "spread": float(f"{spread_now:.2f}"),
+                "price_minus_long": float(f"{(current_price - long_ma) if current_price else 0:.2f}"),
+                "type": "dead",
+            },
+        }
         last_report_time["dead"] = now
 
     else:
@@ -149,7 +172,7 @@ def analyze_crossover(
                         tag = "⏬ 추세 약화 조짐"
                         explain = f"{'상승' if signal_type == 'golden' else '하락'} 흐름이 약해지고 있습니다."
                     else:
-                        return None, short_ma, long_ma, signal_type
+                        return None, short_ma, long_ma, signal_type, None
                     last_report_time[signal_type] = now
 
                 # ✅ 리마인드 (1시간마다 1회)
@@ -170,9 +193,9 @@ def analyze_crossover(
                     last_report_time[signal_type] = now
 
                 else:
-                    return None, short_ma, long_ma, signal_type
+                    return None, short_ma, long_ma, signal_type, None
             else:
-                return None, short_ma, long_ma, signal_type
+                return None, short_ma, long_ma, signal_type, None
 
             signal = (
                 f"{'🟡' if signal_type == 'golden' else '⚫️'} *{signal_type.capitalize()} 상태 유지 중*\n"
@@ -185,4 +208,4 @@ def analyze_crossover(
         signal += f"\n📊 이동평균선 비교\n단기: {short_ma:.2f} {relation} 장기: {long_ma:.2f}"
         signal += rate_change_info
 
-    return signal, short_ma, long_ma, signal_type
+    return signal, short_ma, long_ma, signal_type, struct_signal

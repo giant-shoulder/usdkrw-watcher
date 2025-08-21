@@ -188,9 +188,9 @@ async def analyze_bollinger(
     cross_msg: str = None,
     jump_msg: str = None,
     prev_status: str = None  # ✅ 추가: 이전 상태 전달
-) -> tuple[str | None, list[str], int, int, int, int]:
+) -> tuple[str | None, list[str], int, int, int, int, dict | None]:
     if len(rates) < MOVING_AVERAGE_PERIOD:
-        return None, [], prev_upper, prev_lower, 0, 0
+        return None, [], prev_upper, prev_lower, 0, 0, None
 
     avg = mean(rates[-MOVING_AVERAGE_PERIOD:])
     std = stdev(rates[-MOVING_AVERAGE_PERIOD:])
@@ -199,7 +199,7 @@ async def analyze_bollinger(
     band_width = upper - lower
 
     if band_width < EPSILON:
-        return None, [], prev_upper, prev_lower, 0, 0
+        return None, [], prev_upper, prev_lower, 0, 0, None
 
     # 🔎 스퀴즈/신뢰도 보강
     BAND_WIDTH_HISTORY.append(band_width)
@@ -221,6 +221,7 @@ async def analyze_bollinger(
         )
 
     messages = []
+    struct_signal = None
     status = None
     upper_streak, lower_streak = 0, 0
     new_upper_level, new_lower_level = prev_upper, prev_lower
@@ -232,7 +233,7 @@ async def analyze_bollinger(
 
         # ✅ 동일 상태면 발송 금지
         if prev_status == status:
-            return status, [], prev_upper, prev_lower, prev_upper, prev_lower
+            return status, [], prev_upper, prev_lower, prev_upper, prev_lower, None
 
         upper_streak = prev_upper + 1
         lower_streak = 0
@@ -255,6 +256,18 @@ async def analyze_bollinger(
             f"(z={z:.2f}, 밴드폭={band_width:.2f}) — 신뢰도 {confidence}!"
         )
 
+        struct_signal = {
+            "key": "boll",
+            "direction": +1,
+            "confidence": 0.9 if confidence == "높음" else (0.75 if confidence == "중간" else 0.5),
+            "evidence": headline,
+            "meta": {
+                "z": float(f"{z:.2f}"),
+                "band_width": float(f"{band_width:.2f}"),
+                "type": "upper_breakout",
+            },
+        }
+
         await insert_breakout_event(
             conn, event_type="upper_breakout", timestamp=now, boundary=upper, threshold=upper
         )
@@ -264,7 +277,7 @@ async def analyze_bollinger(
 
         # ✅ 동일 상태면 발송 금지
         if prev_status == status:
-            return status, [], prev_upper, prev_lower, prev_upper, prev_lower
+            return status, [], prev_upper, prev_lower, prev_upper, prev_lower, None
 
         lower_streak = prev_lower + 1
         upper_streak = 0
@@ -287,12 +300,24 @@ async def analyze_bollinger(
             f"(z={z:.2f}, 밴드폭={band_width:.2f}) — 신뢰도 {confidence}!"
         )
 
+        struct_signal = {
+            "key": "boll",
+            "direction": -1,
+            "confidence": 0.9 if confidence == "높음" else (0.75 if confidence == "중간" else 0.5),
+            "evidence": headline,
+            "meta": {
+                "z": float(f"{z:.2f}"),
+                "band_width": float(f"{band_width:.2f}"),
+                "type": "lower_breakout",
+            },
+        }
+
         await insert_breakout_event(
             conn, event_type="lower_breakout", timestamp=now, boundary=lower, threshold=lower
         )
 
     else:
-        return None, [], prev_upper, prev_lower, 0, 0
+        return None, [], prev_upper, prev_lower, 0, 0, None
 
     band_msg = (
         f"{icon} 현재 밴드 폭은 *{band_width:.2f}원*입니다.\n"
@@ -322,4 +347,4 @@ async def analyze_bollinger(
         new_upper_level = u_level
         new_lower_level = l_level
 
-    return status, messages, upper_streak, lower_streak, new_upper_level, new_lower_level
+    return status, messages, upper_streak, lower_streak, new_upper_level, new_lower_level, struct_signal

@@ -40,14 +40,19 @@ def _level_for_ratio(ratio: float) -> tuple[str, str]:
     return ("약함", "🟨 약함")
 
 # ✅ 예상 범위 이탈 감지 및 쿨다운/지속 알림 추가 적용
-def analyze_expected_range(rate: float, expected: dict, now: datetime) -> str | None:
+# ✅ 항상 (message_or_none, struct_or_none) 튜플을 반환하도록 수정
+
+def analyze_expected_range(rate: float, expected: dict, now: datetime) -> tuple[str | None, dict | None]:
+    """Return (message, struct) where struct is a structured signal dict or None."""
     global was_below_expected, was_above_expected, last_expected_alert_time
     global below_start_time, above_start_time
 
     if not expected or expected["date"] != now.date():
-        return None
+        return None, None
 
     low, high = expected["low"], expected["high"]
+
+    struct = None
 
     # 히스테리시스 경계
     below_hard = (rate < (low - HYST))
@@ -67,24 +72,40 @@ def analyze_expected_range(rate: float, expected: dict, now: datetime) -> str | 
             was_below_expected = True
             last_expected_alert_time = now
             below_start_time = now
-            return (
+            message = (
                 f"🚨 *예상 범위 하단 이탈 감지* {level_badge}\n"
                 f"📌 예상 하단: {low:.2f}원\n"
                 f"💱 현재 환율: {rate:.2f}원 (하단 대비 −{dev:.2f}원, 폭 대비 {ratio*100:.1f}%, 레벨: {level_txt})\n"
                 "📉 시장이 딜러 예상보다 약세로 이탈했습니다."
             )
+            struct = {
+                "key": "expected",
+                "direction": -1,
+                "confidence": 0.75 if ratio >= LEVEL_MILD else 0.6,
+                "evidence": f"하단 이탈 (폭 대비 {ratio*100:.1f}%, 레벨 {level_txt})",
+                "meta": {"deviation": float(f"{dev:.2f}"), "ratio": float(f"{ratio:.4f}"), "bound": float(f"{low:.2f}"), "type": "below_break"},
+            }
+            return message, struct
         elif in_cooldown():
-            return None
+            return None, None
         elif below_start_time and (now - below_start_time) > SUSTAINED_DURATION:
             last_expected_alert_time = now
             below_start_time = None
-            return (
+            message = (
                 f"⚠️ *하단 이탈 지속(30분+)* {level_badge}\n"
                 f"📌 예상 하단: {low:.2f}원\n"
                 f"💱 현재 환율: {rate:.2f}원 (하단 대비 −{dev:.2f}원, 폭 대비 {ratio*100:.1f}%, 레벨: {level_txt})\n"
                 "📉 약세 흐름이 장기화되고 있습니다."
             )
-        return None
+            struct = {
+                "key": "expected",
+                "direction": -1,
+                "confidence": 0.9,
+                "evidence": f"하단 이탈 지속 30분+ (폭 대비 {ratio*100:.1f}%)",
+                "meta": {"deviation": float(f"{dev:.2f}"), "ratio": float(f"{ratio:.4f}"), "bound": float(f"{low:.2f}"), "type": "below_sustain"},
+            }
+            return message, struct
+        return None, None
 
     # 상단 돌파 (히스테리시스 적용)
     elif above_hard:
@@ -95,24 +116,40 @@ def analyze_expected_range(rate: float, expected: dict, now: datetime) -> str | 
             was_above_expected = True
             last_expected_alert_time = now
             above_start_time = now
-            return (
+            message = (
                 f"🚨 *예상 범위 상단 돌파 감지* {level_badge}\n"
                 f"📌 예상 상단: {high:.2f}원\n"
                 f"💱 현재 환율: {rate:.2f}원 (상단 대비 +{dev:.2f}원, 폭 대비 {ratio*100:.1f}%, 레벨: {level_txt})\n"
                 "📈 시장이 딜러 예상보다 강세로 이탈했습니다."
             )
+            struct = {
+                "key": "expected",
+                "direction": +1,
+                "confidence": 0.75 if ratio >= LEVEL_MILD else 0.6,
+                "evidence": f"상단 돌파 (폭 대비 {ratio*100:.1f}%, 레벨 {level_txt})",
+                "meta": {"deviation": float(f"{dev:.2f}"), "ratio": float(f"{ratio:.4f}"), "bound": float(f"{high:.2f}"), "type": "above_break"},
+            }
+            return message, struct
         elif in_cooldown():
-            return None
+            return None, None
         elif above_start_time and (now - above_start_time) > SUSTAINED_DURATION:
             last_expected_alert_time = now
             above_start_time = None
-            return (
+            message = (
                 f"⚠️ *상단 돌파 지속(30분+)* {level_badge}\n"
                 f"📌 예상 상단: {high:.2f}원\n"
                 f"💱 현재 환율: {rate:.2f}원 (상단 대비 +{dev:.2f}원, 폭 대비 {ratio*100:.1f}%, 레벨: {level_txt})\n"
                 "📈 강세 흐름이 장기화되고 있습니다."
             )
-        return None
+            struct = {
+                "key": "expected",
+                "direction": +1,
+                "confidence": 0.9,
+                "evidence": f"상단 돌파 지속 30분+ (폭 대비 {ratio*100:.1f}%)",
+                "meta": {"deviation": float(f"{dev:.2f}"), "ratio": float(f"{ratio:.4f}"), "bound": float(f"{high:.2f}"), "type": "above_sustain"},
+            }
+            return message, struct
+        return None, None
 
     # 범위 내로 복귀 (히스테리시스 기반 확실 복귀) 시 상태 초기화 + 알림
     if reenter_from_below:
@@ -120,28 +157,44 @@ def analyze_expected_range(rate: float, expected: dict, now: datetime) -> str | 
         below_start_time = None
         last_expected_alert_time = now
         margin = rate - low
-        return (
+        message = (
             f"✅ *예상 범위 하단 복귀 확인*\n"
             f"📌 예상 하단: {low:.2f}원\n"
             f"💱 현재 환율: {rate:.2f}원 (복귀 여유 +{margin:.2f}원)\n"
             "↩️ 하단 경계 상향 복귀를 확인했습니다."
         )
+        struct = {
+            "key": "expected",
+            "direction": 0,
+            "confidence": 0.7,
+            "evidence": "하단 복귀 확인",
+            "meta": {"margin": float(f"{margin:.2f}"), "type": "below_reenter"},
+        }
+        return message, struct
 
     if reenter_from_above:
         was_above_expected = False
         above_start_time = None
         last_expected_alert_time = now
         margin = high - rate
-        return (
+        message = (
             f"✅ *예상 범위 상단 복귀 확인*\n"
             f"📌 예상 상단: {high:.2f}원\n"
             f"💱 현재 환율: {rate:.2f}원 (복귀 여유 +{margin:.2f}원)\n"
             "↩️ 상단 경계 하향 복귀를 확인했습니다."
         )
+        struct = {
+            "key": "expected",
+            "direction": 0,
+            "confidence": 0.7,
+            "evidence": "상단 복귀 확인",
+            "meta": {"margin": float(f"{margin:.2f}"), "type": "above_reenter"},
+        }
+        return message, struct
 
     # 완전 범위 내 유지: 상태만 리셋
     was_below_expected = False
     was_above_expected = False
     below_start_time = None
     above_start_time = None
-    return None
+    return None, None

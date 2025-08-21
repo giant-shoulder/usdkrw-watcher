@@ -1,5 +1,5 @@
 from typing import Optional, Dict, Tuple
-from strategies.summary import make_score_gauge
+from strategies.utils.score_bar import make_score_gauge
 
 # === 가중치 설정 (환경에 따라 조정 가능) ===
 WEIGHTS: Dict[str, float] = {
@@ -171,6 +171,7 @@ def analyze_combo(
         "상승 전환": "🛒 매수 (Buy)",   # 구매 아이콘
         "하락 전환": "💸 매도 (Sell)",  # 현금 유출 아이콘
     }.get(signal_type, "⏸ 관망 (Hold)")
+    header_line = f"*{headline} ({pct}/100)*"
 
     # === 핵심 근거 상위 2~3개 선별 ===
     key_emojis = {"boll": "📊", "cross": "🔁", "jump": "⚡", "expected": "📡"}
@@ -197,7 +198,7 @@ def analyze_combo(
     gauge_line = make_score_gauge(headline, pct)
 
     message = (
-        f"{headline} ({pct}/100)\n\n"
+        f"{header_line}\n\n"
         f"📌 핵심 근거\n" + ("\n".join(bullets) if bullets else "- (근거 없음)") + "\n\n"
         f"{strength_title}\n"
         f"{gauge_line}"
