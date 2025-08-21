@@ -188,3 +188,41 @@ def get_action_message(direction: str, score: int) -> str:
             "ℹ️ *명확한 방향성이 없습니다.*\n"
             "💡 시장 상황을 조금 더 지켜보는 것이 좋겠습니다."
         )
+    
+
+# === 추가: 정량 보조지표 유틸 ===
+from statistics import mean
+from math import sqrt
+
+def ema(series, period):
+    if len(series) < period: return None
+    k = 2 / (period + 1)
+    e = series[-period]
+    for v in series[-period+1:]:
+        e = v * k + e * (1 - k)
+    return e
+
+def sma(series, period):
+    if len(series) < period: return None
+    return sum(series[-period:]) / period
+
+def rolling_stdev(series, period):
+    if len(series) < period: return None
+    window = series[-period:]
+    m = mean(window)
+    var = sum((x - m) ** 2 for x in window) / (len(window) - 1)
+    return sqrt(var)
+
+def zscore(series, period):
+    """마지막 값이 최근 period 평균 대비 얼마나 벗어났는지 표준화"""
+    if len(series) < period: return None
+    m = sma(series, period)
+    s = rolling_stdev(series, period)
+    if not s or s == 0: return 0.0
+    return (series[-1] - m) / s
+
+def atr_from_rates(highs, lows, closes, period=14):
+    """간단 ATR: 고-저 폭 평균 (True Range 간소화 버전)"""
+    if len(highs) < period or len(lows) < period: return None
+    trs = [h - l for h, l in zip(highs[-period:], lows[-period:])]
+    return sum(trs) / len(trs)

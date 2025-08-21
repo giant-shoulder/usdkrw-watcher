@@ -5,6 +5,14 @@ from io import BytesIO
 from datetime import datetime
 import matplotlib.pyplot as plt
 from pytz import timezone
+from strategies.utils.score_bar import make_score_gauge
+
+# === Trend classification thresholds (tunable) ===
+BANDWIDTH_TIGHT = 0.20   # 횡보로 볼 변동 폭(원)
+DIFF_STRONG     = 0.20   # 강한 상승/하락으로 볼 종가-시가 차이(원)
+DIFF_WEAK       = 0.10   # 약한 방향성 최소 임계(원)
+PROX_NEAR       = 0.10   # 종가가 고저점에 근접했다고 보는 거리(원)
+PULLBACK_DIST   = 0.30   # 급등/급락 후 되돌림 판단 거리(원)
 
 
 def classify_volatility(high: float, low: float) -> str:
@@ -80,48 +88,61 @@ def generate_30min_summary(
     else:
         volatility = f"{band_width:.2f}원 (좁은 변동성)"
 
-    # 📈 추세 분류
-    high_diff = round(high - end_rate, 2)
-    low_diff = round(end_rate - low, 2)
+    # 📈 추세 분류 (개선 버전)
+    high_diff = round(high - end_rate, 2)  # 고점-종가 (양수면 고점 대비 밀림)
+    low_diff  = round(end_rate - low, 2)   # 종가-저점 (양수면 저점 대비 여유)
 
-    if band_width <= 0.2:
+    if band_width <= BANDWIDTH_TIGHT and abs(diff) <= DIFF_WEAK:
         trend = "횡보"
-    elif diff > 0.05 and high > start_rate and low >= start_rate - 0.05:
-        trend = "상승"
-    elif diff < -0.05 and low < start_rate and high <= start_rate + 0.05:
-        trend = "하락"
-    elif abs(diff) < 0.1 and high_diff > 0.2:
+    elif diff >= DIFF_STRONG:
+        # 상승: 종가가 고점 근처이고 최근 기울기도 양수면 강한 상승
+        if abs(high - end_rate) <= PROX_NEAR and slope_10min > 0:
+            trend = "강한 상승"
+        else:
+            trend = "상승"
+    elif diff <= -DIFF_STRONG:
+        # 하락: 종가가 저점 근처이고 최근 기울기도 음수면 강한 하락
+        if abs(end_rate - low) <= PROX_NEAR and slope_10min < 0:
+            trend = "강한 하락"
+        else:
+            trend = "하락"
+    elif abs(diff) < DIFF_WEAK and (high - end_rate) >= PULLBACK_DIST:
         trend = "급등 후 조정"
-    elif abs(diff) < 0.1 and low_diff > 0.2:
+    elif abs(diff) < DIFF_WEAK and (end_rate - low) >= PULLBACK_DIST:
         trend = "급락 후 반등"
     else:
         trend = "혼조"
 
     # 🧭 추세별 이모지
     trend_emojis = {
+        "강한 상승": "🚀📈",
+        "강한 하락": "🛬📉",
         "상승": "📈",
         "하락": "📉",
         "급등 후 조정": "🔺📉",
         "급락 후 반등": "🔻📈",
         "혼조": "🔀",
-        "횡보": "➖"
+        "횡보": "➖",
     }
     trend_emoji = trend_emojis.get(trend, "📊")
 
     # 💡 종합 해석
     advice_map = {
+        "강한 상승": "강한 상승 추세 → 분할 매수 또는 추세 추종 고려",
+        "강한 하락": "강한 하락 추세 → 반등 전까지 보수적 접근",
         "상승": "상승 흐름 유지 → 관망 후 소량 매수 고려",
         "하락": "하락 흐름 유지 → 관망 권장",
         "급등 후 조정": "급등 후 되돌림 진행 중 → 추세 전환 가능성 주의",
         "급락 후 반등": "급락 후 단기 반등 → 추세 지속 여부 확인 필요",
         "혼조": "단기 등락 반복 → 관망 우선",
-        "횡보": "변동성 낮음 → 관망 유지"
+        "횡보": "변동성 낮음 → 관망 유지",
     }
     advice = advice_map[trend]
 
     # 📝 주요 이벤트 정리
     events_text = "\n".join(f"- {e}" for e in major_events) if major_events else "해당 없음"
 
+    gauge = make_score_gauge(trend, diff, slope_10min, band_width)
     return (
         f"⏱️ *최근 30분 환율 요약 ({start_time.strftime('%H:%M')} ~ {end_time.strftime('%H:%M')})*\n\n"
         f"{trend_emoji} *추세*: {trend}\n"
@@ -130,7 +151,9 @@ def generate_30min_summary(
         f"📊 *변동폭*: 최고 {high:.2f} / 최저 {low:.2f}\n"
         f"- 변동 폭: {volatility}\n\n"
         f"📌 *주요 이벤트*\n{events_text}\n\n"
-        f"💡 *종합 해석*: {advice}"
+        f"💡 *종합 해석*: {advice}\n\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"📊 *강도 게이지*\n{gauge}"
     )
 
 
@@ -198,4 +221,3 @@ def generate_30min_chart(rates: list[tuple[datetime, float]]) -> BytesIO | None:
 
     print(f"✅ 차트 생성 완료 (데이터 {len(values)}건)")
     return buf
-

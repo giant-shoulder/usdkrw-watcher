@@ -98,10 +98,10 @@ async def run_watcher(db_pool):
                             await send_telegram(r_msg)
 
                         expected_range = await get_today_expected_range(conn)
-                        e_msg = analyze_expected_range(rate, expected_range, now)
-                        j_msg = analyze_jump(prev_rate, rate)
+                        e_msg, e_struct = analyze_expected_range(rate, expected_range, now)
+                        j_msg, j_struct = analyze_jump(prev_rate, rate)
 
-                        c_msg, temp_state["short_avg"], temp_state["long_avg"], temp_state["type"] = analyze_crossover(
+                        c_msg, temp_state["short_avg"], temp_state["long_avg"], temp_state["type"], c_struct = analyze_crossover(
                             rates=rates,
                             prev_short_avg=temp_state["short_avg"],
                             prev_long_avg=temp_state["long_avg"],
@@ -110,7 +110,7 @@ async def run_watcher(db_pool):
                             current_price=rate
                         )
 
-                        b_status, b_msgs, upper_streak, lower_streak, prev_upper_level, prev_lower_level = await analyze_bollinger(
+                        b_status, b_msgs, upper_streak, lower_streak, prev_upper_level, prev_lower_level, b_struct = await analyze_bollinger(
                             conn=conn,
                             rates=rates,
                             current=rate,
@@ -136,6 +136,10 @@ async def run_watcher(db_pool):
                             lower_streak,
                             prev_upper_level,
                             prev_lower_level,
+                            b_struct=b_struct,
+                            j_struct=j_struct,
+                            c_struct=c_struct,
+                            e_struct=e_struct,
                         )
 
                         if combo_result:

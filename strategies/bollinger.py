@@ -11,8 +11,33 @@ from db import (
     mark_breakout_resolved
 )
 from utils import now_kst
+from strategies.utils.signal_utils import zscore, rolling_stdev, sma
+from collections import deque
+
+SQUEEZE_LOOKBACK = 60          # 최근 60틱 기준
+SQUEEZE_PCTL = 0.20            # 하위 20%면 스퀴즈
+RETEST_TOL = 0.15              # 리테스트 허용 오차(원)
+MIN_Z_FOR_TREND = 1.0          # 추세성 돌파로 인정할 z
 EPSILON = 0.01  # 기준선과 거의 같은 경우 오차 허용
 
+# 최근 밴드폭 이력 (스퀴즈 판별용)
+BAND_WIDTH_HISTORY = deque(maxlen=SQUEEZE_LOOKBACK * 2)
+
+def _is_squeeze(band_width_series):
+    if len(band_width_series) < SQUEEZE_LOOKBACK:
+        return False
+    bw = band_width_series[-1]
+    hist = sorted(band_width_series[-SQUEEZE_LOOKBACK:])
+    threshold = hist[int(len(hist) * SQUEEZE_PCTL)]
+    return bw <= threshold
+
+def _retest_confirmed(last_price, baseline, direction):
+    # 상단 돌파 후 baseline(상단밴드) 재확인 or 하단 이탈 후 하단밴드 재확인
+    if direction == "upper":
+        return abs(last_price - baseline) <= RETEST_TOL or last_price > baseline
+    else:
+        return abs(last_price - baseline) <= RETEST_TOL or last_price < baseline
+    
 
 def get_volatility_info(band_width: float) -> tuple[str, str]:
     if band_width < 2:
@@ -176,6 +201,11 @@ async def analyze_bollinger(
     if band_width < EPSILON:
         return None, [], prev_upper, prev_lower, 0, 0
 
+    # 🔎 스퀴즈/신뢰도 보강
+    BAND_WIDTH_HISTORY.append(band_width)
+    is_squeeze = _is_squeeze(list(BAND_WIDTH_HISTORY))
+    z = zscore(rates, MOVING_AVERAGE_PERIOD) or 0.0
+
     volatility_label, volatility_comment = get_volatility_info(band_width)
 
     arrow = ""
@@ -217,6 +247,14 @@ async def analyze_bollinger(
         icon = "📈"
         label = "상단"
 
+        # 신뢰도 산정: z-score + 리테스트 확인
+        trusted = (z >= MIN_Z_FOR_TREND) and _retest_confirmed(current, upper, "upper")
+        confidence = "높음" if trusted else ("중간" if z >= 0.5 else "낮음")
+        headline = (
+            f"{icon} 볼린저 밴드 {('스퀴즈→' if is_squeeze else '')}{label} 돌파 "
+            f"(z={z:.2f}, 밴드폭={band_width:.2f}) — 신뢰도 {confidence}!"
+        )
+
         await insert_breakout_event(
             conn, event_type="upper_breakout", timestamp=now, boundary=upper, threshold=upper
         )
@@ -241,6 +279,14 @@ async def analyze_bollinger(
         icon = "📉"
         label = "하단"
 
+        # 신뢰도 산정: z-score + 리테스트 확인
+        trusted = (z <= -MIN_Z_FOR_TREND) and _retest_confirmed(current, lower, "lower")
+        confidence = "높음" if trusted else ("중간" if z <= -0.5 else "낮음")
+        headline = (
+            f"{icon} 볼린저 밴드 {('스퀴즈→' if is_squeeze else '')}{label} 이탈 "
+            f"(z={z:.2f}, 밴드폭={band_width:.2f}) — 신뢰도 {confidence}!"
+        )
+
         await insert_breakout_event(
             conn, event_type="lower_breakout", timestamp=now, boundary=lower, threshold=lower
         )
@@ -254,7 +300,7 @@ async def analyze_bollinger(
     )
 
     messages.append(
-        f"{icon} 볼린저 밴드 {label} {'돌파' if label == '상단' else '이탈'}!\n"
+        f"{headline}\n"
         f"이동평균: {avg:.2f}\n현재: {current:.2f} {arrow}\n"
         f"{label}: {upper if label == '상단' else lower:.2f}\n\n"
         f"📏 현재가가 {label}보다 {abs(distance):.2f}원 {'위' if label == '상단' else '아래'}입니다."
