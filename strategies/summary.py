@@ -150,7 +150,6 @@ def generate_30min_summary(
     # 📝 주요 이벤트 정리
     events_text = "\n".join(f"- {e}" for e in major_events) if major_events else "해당 없음"
 
-    gauge = make_score_gauge(trend, diff)
     return (
         f"⏱️ *최근 30분 환율 요약 ({start_time.strftime('%H:%M')} ~ {end_time.strftime('%H:%M')})*\n\n"
         f"{trend_emoji} *추세*: {trend}\n"
@@ -160,8 +159,6 @@ def generate_30min_summary(
         f"- 변동 폭: {volatility}\n\n"
         f"📌 *주요 이벤트*\n{events_text}\n\n"
         f"💡 *종합 해석*: {advice}\n\n"
-        f"━━━━━━━━━━━━━━━\n"
-        f"📊 *강도 게이지*\n{gauge}"
     )
 
 

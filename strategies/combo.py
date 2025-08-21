@@ -1,6 +1,7 @@
 from typing import Optional, Dict, Tuple
 from strategies.utils.score_bar import make_score_gauge
 import math
+from strategies.ai_decider import AIDecider, build_features
 
 # === 가중치 설정 (환경에 따라 조정 가능) ===
 WEIGHTS: Dict[str, float] = {
@@ -144,52 +145,26 @@ def analyze_combo(
     if len(active_nonzero) < 2:
         return None
 
-    # 가중 합산 스코어 (-1..+1)
-    raw = 0.0
-    total_w = 0.0
-    for key, (d, c, _e) in structs.items():
-        w = WEIGHTS.get(key, 0.0)
-        raw += w * d * c
-        total_w += w
-    signed = raw / total_w if total_w > 0 else 0.0
+    # === AI 기반 결론 ===
+    feats = build_features(structs)
+    ai_action, ai_probs = AIDecider().predict(feats)
 
-    # 충돌 페널티: 서로 다른 부호의 강한 신호가 공존할 때 약화
-    dirs = [d for (d, _c, _e) in structs.values() if d != 0]
-    if len(dirs) >= 2 and (min(dirs) < 0 < max(dirs)):
-        signed *= 0.7
-
-    # 합의 정도 파악 (방향 일치 수)
-    pos = sum(1 for (d, _c, _e) in structs.values() if d > 0)
-    neg = sum(1 for (d, _c, _e) in structs.values() if d < 0)
-    agree_count = max(pos, neg)
-
-    # 방향/점수 해석
-    if signed > 0.10:
+    if ai_action == "buy":
         signal_type = "상승 전환"
-    elif signed < -0.10:
+        pct = int(round(100 * ai_probs.get("buy", 0.0)))
+    elif ai_action == "sell":
         signal_type = "하락 전환"
+        pct = int(round(100 * ai_probs.get("sell", 0.0)))
     else:
-        signal_type = None
-
-    if not signal_type:
-        return None
-
-    score = signed  # -1..+1
-    pct = _score_to_pct(score)
-
-    # 단일 전략 과대평가 방지 & 합의 부족 시 상한 적용
-    if len(active_nonzero) == 1:
-        pct = min(pct, 70)
-    elif agree_count < 2:
-        pct = min(pct, 85)
-
-    pct = max(0, min(100, pct))
+        # 관망 결론도 메시지로 발송 (활성 신호는 있었으나 확신 부족)
+        signal_type = "관망"
+        pct = int(round(100 * ai_probs.get("hold", 0.0)))
 
     # === 결론 헤드라인 (사고/파는 의미가 명확한 아이콘으로 교체) ===
     headline = {
-        "상승 전환": "🛒 매수 (Buy)",   # 구매 아이콘
-        "하락 전환": "💸 매도 (Sell)",  # 현금 유출 아이콘
-    }.get(signal_type, "⏸ 관망 (Hold)")
+        "상승 전환": "🔴 🛒 매수 (Buy)",   # KR convention: 상승=빨강
+        "하락 전환": "🔵 💸 매도 (Sell)",  # KR convention: 하락=파랑
+    }.get(signal_type, "⚪ ⏸ 관망 (Hold)")
     header_line = f"*{headline} ({pct}/100)*"
 
     # === 핵심 근거 상위 2~3개 선별 ===
@@ -210,8 +185,8 @@ def analyze_combo(
     # === 점수 게이지 (매수=파란색, 매도=빨간색, 관망=회색) ===
     # 신호 라벨 (게이지 타이틀용)
     strength_title = {
-        "상승 전환": "🔵 매수 신호 강도",
-        "하락 전환": "🔴 매도 신호 강도",
+        "상승 전환": "🔴 매수 신호 강도",
+        "하락 전환": "🔵 매도 신호 강도",
     }.get(signal_type, "⚪ 관망 신호 강도")
 
     gauge_line = make_score_gauge(headline, pct)
