@@ -1,10 +1,11 @@
 from typing import Optional, Dict, Tuple
 from strategies.utils.score_bar import make_score_gauge
+import math
 
 # === 가중치 설정 (환경에 따라 조정 가능) ===
 WEIGHTS: Dict[str, float] = {
-    "boll": 0.35,
-    "cross": 0.30,
+    "boll": 0.30,
+    "cross": 0.35,
     "jump": 0.20,
     "expected": 0.15,
 }
@@ -64,8 +65,8 @@ def _to_struct(msg: str) -> Tuple[int, float, str]:
 
 
 def _score_to_pct(signed_score: float) -> int:
-    """-1..+1 → 0..100 정규화"""
-    return int(min(100, max(0, round(50 + signed_score * 50))))
+    """Nonlinear mapping: -1..+1 → ≈5..95 using tanh to avoid exaggerated extremes."""
+    return int(round(50 + 45 * math.tanh(signed_score / 0.6)))
 
 
 def analyze_combo(
@@ -152,6 +153,12 @@ def analyze_combo(
     if len(dirs) >= 2 and (min(dirs) < 0 < max(dirs)):
         signed *= 0.7
 
+    # 활성 기여 신호 및 합의 정도
+    active_nonzero = [k for k, (d, c, _e) in structs.items() if d != 0 and c > 0]
+    pos = sum(1 for (d, _c, _e) in structs.values() if d > 0)
+    neg = sum(1 for (d, _c, _e) in structs.values() if d < 0)
+    agree_count = max(pos, neg)
+
     # 방향/점수 해석
     if signed > 0.10:
         signal_type = "상승 전환"
@@ -165,6 +172,14 @@ def analyze_combo(
 
     score = signed  # -1..+1
     pct = _score_to_pct(score)
+
+    # 단일 전략 과대평가 방지 & 합의 부족 시 상한 적용
+    if len(active_nonzero) == 1:
+        pct = min(pct, 70)
+    elif agree_count < 2:
+        pct = min(pct, 85)
+
+    pct = max(0, min(100, pct))
 
     # === 결론 헤드라인 (사고/파는 의미가 명확한 아이콘으로 교체) ===
     headline = {

@@ -47,7 +47,7 @@ def get_volatility_info(band_width: float) -> tuple[str, str]:
     elif band_width < 5:
         return "보통 수준의 변동성", "일반적인 변동 구간으로 해석됩니다."
     elif band_width < 7:
-        return "상대적으로 넓은 변동성", "가격이 빠르게 움직일 수 있는 구간입니다."
+        return "상대적으로 넓은 변동성", "가격가 빠르게 움직일 수 있는 구간입니다."
     else:
         return "매우 넓은 변동성 구간", "시장 불확실성이 높아 급격한 변동이 우려됩니다."
 
@@ -256,10 +256,20 @@ async def analyze_bollinger(
             f"(z={z:.2f}, 밴드폭={band_width:.2f}) — 신뢰도 {confidence}!"
         )
 
+        # 보수적 신뢰도: 스퀴즈+리테스트 동시 충족시에만 높은 신뢰도
+        if trusted and is_squeeze:
+            conf_num = 0.85
+        elif trusted:
+            conf_num = 0.75
+        elif z >= 0.5:
+            conf_num = 0.60
+        else:
+            conf_num = 0.45
+
         struct_signal = {
             "key": "boll",
             "direction": +1,
-            "confidence": 0.9 if confidence == "높음" else (0.75 if confidence == "중간" else 0.5),
+            "confidence": conf_num,
             "evidence": headline,
             "meta": {
                 "z": float(f"{z:.2f}"),
@@ -300,10 +310,19 @@ async def analyze_bollinger(
             f"(z={z:.2f}, 밴드폭={band_width:.2f}) — 신뢰도 {confidence}!"
         )
 
+        if trusted and is_squeeze:
+            conf_num = 0.85
+        elif trusted:
+            conf_num = 0.75
+        elif z <= -0.5:
+            conf_num = 0.60
+        else:
+            conf_num = 0.45
+
         struct_signal = {
             "key": "boll",
             "direction": -1,
-            "confidence": 0.9 if confidence == "높음" else (0.75 if confidence == "중간" else 0.5),
+            "confidence": conf_num,
             "evidence": headline,
             "meta": {
                 "z": float(f"{z:.2f}"),
