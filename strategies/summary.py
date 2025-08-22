@@ -6,6 +6,7 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 from pytz import timezone
 from strategies.utils.score_bar import make_score_gauge
+from strategies.ai_decider import AIDecider
 
 # === Trend classification thresholds (tunable) ===
 BANDWIDTH_TIGHT = 0.20   # 횡보로 볼 변동 폭(원)
@@ -14,17 +15,41 @@ DIFF_WEAK       = 0.10   # 약한 방향성 최소 임계(원)
 PROX_NEAR       = 0.10   # 종가가 고저점에 근접했다고 보는 거리(원)
 PULLBACK_DIST   = 0.30   # 급등/급락 후 되돌림 판단 거리(원)
 
+# === AI feature builder for 30분 요약 ===
+# AIDecider는 다음 키들을 인식함: expected_dir_±1, boll_dir_±1, cross_type_golden/dead, agree_count
+# 여기서는 시계열 통계로 유사 신호를 구성해 전달한다.
 
-def classify_volatility(high: float, low: float) -> str:
-    """변동폭에 따른 간단한 변동성 평가"""
-    width = high - low
-    if width < 1:
-        return f"{width:.2f}원 (매우 좁은 변동성)"
-    elif width < 2:
-        return f"{width:.2f}원 (보통 수준의 변동성)"
-    else:
-        return f"{width:.2f}원 (상대적으로 넓은 변동성)"
-    
+def _build_ai_features_30min(diff: float, slope_10min: float, high: float, low: float, end_rate: float) -> dict:
+    x: dict[str, float] = {"bias": 1.0}
+    band = max(0.01, high - low)
+    pos_from_low = (end_rate - low) / band  # 0(저점)~1(고점)
+
+    # 예상 범위 유사 신호: 상단/하단 쏠림
+    if pos_from_low >= 0.65:
+        x["expected_dir_+1"] = float(f"{pos_from_low:.3f}")  # 상단 근접할수록 강함
+    elif pos_from_low <= 0.35:
+        x["expected_dir_-1"] = float(f"{(1.0 - pos_from_low):.3f}")
+
+    # 볼린저 유사 신호: 고점/저점 근접 + 방향성 일치
+    near_high = (high - end_rate) <= PROX_NEAR
+    near_low = (end_rate - low) <= PROX_NEAR
+    if near_high and (diff > 0 or slope_10min > 0):
+        x["boll_dir_+1"] = 0.6
+    if near_low and (diff < 0 or slope_10min < 0):
+        x["boll_dir_-1"] = 0.6
+
+    # 크로스 유사 신호: 최근 10분 기울기 부호/크기
+    if slope_10min >= DIFF_WEAK:
+        x["cross_type_golden"] = min(1.0, abs(slope_10min) / 0.5)
+    elif slope_10min <= -DIFF_WEAK:
+        x["cross_type_dead"] = min(1.0, abs(slope_10min) / 0.5)
+
+    # 합의 카운트: 상방/하방 신호 중 큰 쪽 개수
+    ups = sum(1 for k in x if k.endswith("_dir_+1") or k.endswith("golden"))
+    dns = sum(1 for k in x if k.endswith("_dir_-1") or k.endswith("dead"))
+    x["agree_count"] = float(max(ups, dns))
+    return x
+
 
 async def get_recent_major_events(conn, current_time) -> list[str]:
     """
@@ -117,6 +142,22 @@ def generate_30min_summary(
     else:
         trend = "혼조"
 
+    # 🤖 AI 기반 추세 보정: 확신이 높을 때(>=0.60) 규칙 기반 판정을 덮어쓴다
+    try:
+        ai_feats = _build_ai_features_30min(diff=diff, slope_10min=slope_10min, high=high, low=low, end_rate=end_rate)
+        ai = AIDecider()
+        ai_action, ai_probs = ai.predict(ai_feats)
+        ai_conf = max(ai_probs.get("buy", 0.0), ai_probs.get("sell", 0.0), ai_probs.get("hold", 0.0))
+        if ai_conf >= 0.60:
+            if ai_action == "buy":
+                trend = "상승"
+            elif ai_action == "sell":
+                trend = "하락"
+            else:
+                trend = "횡보"
+    except Exception:
+        pass  # AI 적용 중 오류가 나도 요약 생성은 지속
+
     # 🧭 추세별 이모지
     trend_emojis = {
         "강한 상승": "🚀📈",
@@ -186,13 +227,16 @@ def generate_30min_chart(rates: list[tuple[datetime, float]]) -> BytesIO | None:
     if max(values) == min(values):
         print("⚠️ 모든 환율 값이 동일합니다 – 평평한 차트가 생성됩니다.")
 
-    # ✅ 추세에 따른 색상 설정
-    if values[-1] > values[0]:
-        color = "red"  # 상승
-    elif values[-1] < values[0]:
+    # ✅ 추세에 따른 색상 설정 (표시 정밀도 고려: 2자리 반올림 기준)
+    EPS = 0.005  # 0.01원 표시 기준에서 동치 판단 여유
+    start_v = round(values[0], 2)
+    end_v = round(values[-1], 2)
+    if end_v - start_v > EPS:
+        color = "red"   # 상승
+    elif start_v - end_v > EPS:
         color = "blue"  # 하락
     else:
-        color = "gray"  # 횡보
+        color = "gray"  # 횡보 (표시상 동일로 간주)
 
     # ✅ 포인트 주석 함수 정의
     def annotate_point(x, y, label, align="right"):
@@ -214,8 +258,8 @@ def generate_30min_chart(rates: list[tuple[datetime, float]]) -> BytesIO | None:
     plt.grid(True)
 
     # ✅ 시작점, 종료점 강조
-    annotate_point(times[0], values[0], values[0], align="right")
-    annotate_point(times[-1], values[-1], values[-1], align="left")
+    annotate_point(times[0], values[0], round(values[0], 2), align="right")
+    annotate_point(times[-1], values[-1], round(values[-1], 2), align="left")
 
     # ✅ 메모리 버퍼에 저장
     buf = BytesIO()
