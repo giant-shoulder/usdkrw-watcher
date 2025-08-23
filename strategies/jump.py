@@ -38,7 +38,10 @@ def analyze_jump(prev, current, highs=None, lows=None, closes=None, now=None):
 
         is_up = diff > 0
         direction_text = "급등" if is_up else "급락"
-        evidence = f"{direction_text} 감지: {diff:+.2f}원 (ATR={atr:.2f})"
+        evidence = (
+            f"{direction_text} 감지: {diff:+.2f}원 (ATR={atr:.2f})\n"
+            f"💱 환율: {prev:.2f}원 → {current:.2f}원 ({diff:+.2f}원)"
+        )
         msg = f"{'📈' if is_up else '📉'} {evidence}"
 
         struct = {

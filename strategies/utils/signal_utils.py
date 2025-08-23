@@ -222,7 +222,34 @@ def zscore(series, period):
     return (series[-1] - m) / s
 
 def atr_from_rates(highs, lows, closes, period=14):
-    """간단 ATR: 고-저 폭 평균 (True Range 간소화 버전)"""
-    if len(highs) < period or len(lows) < period: return None
-    trs = [h - l for h, l in zip(highs[-period:], lows[-period:])]
-    return sum(trs) / len(trs)
+    """
+    Wilder 스타일 ATR 추정치.
+    우선순위: (high/low/close) → (close-only fallback)
+    TR_i = max(H_i - L_i, |H_i - C_{i-1}|, |L_i - C_{i-1}|)
+    단, 고저가가 없으면 TR_i ≈ |C_i - C_{i-1}| 로 근사.
+    반환값 단위는 원이며, 최근 period 구간의 단순 평균을 사용합니다.
+    """
+    highs = highs or []
+    lows = lows or []
+    closes = closes or []
+
+    n = len(closes)
+
+    # Case A: high/low/close 모두 제공되고 길이가 충분한 경우
+    if highs and lows and n >= period + 1 and len(highs) >= n and len(lows) >= n:
+        trs = []
+        for i in range(1, n):
+            h = highs[i]
+            l = lows[i]
+            pc = closes[i - 1]
+            tr = max(h - l, abs(h - pc), abs(l - pc))
+            trs.append(tr)
+        if len(trs) >= period:
+            return sum(trs[-period:]) / period
+
+    # Case B: 종가만 있는 경우 — 절대 차분으로 근사
+    if n >= period + 1:
+        diffs = [abs(closes[i] - closes[i - 1]) for i in range(1, n)]
+        return sum(diffs[-period:]) / period
+
+    return None
