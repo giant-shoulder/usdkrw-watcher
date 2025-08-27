@@ -175,7 +175,7 @@ def analyze_crossover(
                         return None, short_ma, long_ma, signal_type, None
                     last_report_time[signal_type] = now
 
-                # ✅ 리마인드 (1시간마다 1회)
+                # ✅ 리마인드 (30분마다 1회)
                 elif elapsed >= REMINDER_INTERVAL:
                     tag = "ℹ️ 상태 지속 리마인드"
 

@@ -3,10 +3,13 @@ from statistics import mean, stdev
 from config import MOVING_AVERAGE_PERIOD
 from io import BytesIO
 from datetime import datetime
-import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt # type: ignore
 from pytz import timezone
 from strategies.utils.score_bar import make_score_gauge
-from strategies.ai_decider import AIDecider
+from strategies.ai.ai_decider import AIDecider
+from strategies.ai.ai_summary import compose_freeform_30m
+import asyncio
+from typing import Awaitable, Callable, Optional
 
 # === Trend classification thresholds (tunable) ===
 BANDWIDTH_TIGHT = 0.20   # 횡보로 볼 변동 폭(원)
@@ -158,6 +161,23 @@ def generate_30min_summary(
     except Exception:
         pass  # AI 적용 중 오류가 나도 요약 생성은 지속
 
+    # 🧠 Freeform 자연어 추세/해석 생성 (ai_summary)
+    try:
+        trend_text_ai, advice_text_ai = compose_freeform_30m(
+            start_rate=start_rate,
+            end_rate=end_rate,
+            high=high,
+            low=low,
+            diff=diff,
+            band_width=band_width,
+            slope_10min=slope_10min,
+            ai_probs=locals().get("ai_probs") if "ai_probs" in locals() else None,
+            diff_weak=DIFF_WEAK,
+            bandwidth_tight=BANDWIDTH_TIGHT,
+        )
+    except Exception:
+        trend_text_ai, advice_text_ai = None, None
+
     # 🧭 추세별 이모지
     trend_emojis = {
         "강한 상승": "🚀📈",
@@ -174,7 +194,7 @@ def generate_30min_summary(
     trend_emoji = trend_emojis.get(trend, "📊")
 
     # 💡 종합 해석
-    advice_map = {
+    advice_map_fixed = {
         "강한 상승": "강한 상승 추세 → 분할 매수 또는 추세 추종 고려",
         "강한 하락": "강한 하락 추세 → 반등 전까지 보수적 접근",
         "상승": "상승 흐름 유지 → 관망 후 소량 매수 고려",
@@ -186,20 +206,28 @@ def generate_30min_summary(
         "혼조": "단기 등락 반복 → 관망 우선",
         "횡보": "변동성 낮음 → 관망 유지",
     }
-    advice = advice_map[trend]
+    advice_fixed = advice_map_fixed[trend]
 
     # 📝 주요 이벤트 정리
     events_text = "\n".join(f"- {e}" for e in major_events) if major_events else "해당 없음"
 
+    # ✅ Freeform 우선 사용, 실패 시 기존 라벨/맵핑 사용
+    if trend_text_ai and advice_text_ai:
+        trend_line = f"{trend_emoji} *추세: {trend_text_ai}*"
+        advice_line = f"💡 *종합 해석*: {advice_text_ai}"
+    else:
+        trend_line = f"{trend_emoji} *추세: {trend}*"
+        advice_line = f"💡 *종합 해석*: {advice_fixed}"
+
     return (
         f"⏱️ *최근 30분 환율 요약 ({start_time.strftime('%H:%M')} ~ {end_time.strftime('%H:%M')})*\n\n"
-        f"{trend_emoji} *추세*: {trend}\n"
-        f"- 30분 전: {start_rate:.2f} → 현재: {end_rate:.2f}원 "
-        f"({'+' if diff > 0 else ''}{diff:.2f}원, 최근10분 기울기 {slope_10min:+.3f})\n\n"
+        f"{trend_line}\n"
+        f"- 30분 전: {start_rate:.2f} → 현재: {end_rate:.2f}원 ("
+        f"{'+' if diff > 0 else ''}{diff:.2f}원, 최근10분 기울기 {slope_10min:+.3f})\n\n"
         f"📊 *변동폭*: 최고 {high:.2f} / 최저 {low:.2f}\n"
         f"- 변동 폭: {volatility}\n\n"
         f"📌 *주요 이벤트*\n{events_text}\n\n"
-        f"💡 *종합 해석*: {advice}\n\n"
+        f"{advice_line}\n\n"
     )
 
 
@@ -223,12 +251,16 @@ def generate_30min_chart(rates: list[tuple[datetime, float]]) -> BytesIO | None:
     times = [r[0].astimezone(KST).strftime("%H:%M") for r in rates]
     values = [r[1] for r in rates]
 
+    # ✅ 값 정규화: 2자리 반올림(라벨과 동일 정밀도)로 부동소수 오차 제거
+    values = [round(v, 2) for v in values]
+    v_min, v_max = min(values), max(values)
+
     # ✅ 모든 값이 동일한 경우 (차트는 생성하지만 경고 표시)
-    if max(values) == min(values):
+    if v_max == v_min:
         print("⚠️ 모든 환율 값이 동일합니다 – 평평한 차트가 생성됩니다.")
 
     # ✅ 추세에 따른 색상 설정 (표시 정밀도 고려: 2자리 반올림 기준)
-    EPS = 0.005  # 0.01원 표시 기준에서 동치 판단 여유
+    EPS = 0.0005  # 0.01원 표시 기준에서 동치 판단 여유
     start_v = round(values[0], 2)
     end_v = round(values[-1], 2)
     if end_v - start_v > EPS:
@@ -238,7 +270,41 @@ def generate_30min_chart(rates: list[tuple[datetime, float]]) -> BytesIO | None:
     else:
         color = "gray"  # 횡보 (표시상 동일로 간주)
 
-    # ✅ 포인트 주석 함수 정의
+    # ✅ 차트 그리기
+    plt.figure(figsize=(6, 3))
+
+    # y축 범위: 최소 1.00원 폭을 보장, 더 큰 변동일 때만 pad 적용
+    rng = v_max - v_min
+    if rng <= 2.0:
+        # 기본 2원 폭으로 고정
+        center = (v_max + v_min) / 2.0
+        y_min, y_max = center - 1.0, center + 1.0
+    else:
+        # 실제 변동 폭이 2원 이상일 경우 유동적으로 조정
+        pad = rng * 0.5
+        y_min, y_max = v_min - pad, v_max + pad
+    plt.ylim(y_min, y_max)
+
+    plt.plot(times, values, marker="o", linewidth=2, color=color)
+
+    # ✅ 처음, 중간, 마지막만 금액 표시
+    n = len(values)
+    mid_index = n // 2
+    for i, (t, v) in enumerate(zip(times, values)):
+        if i in (0, mid_index, n - 1):
+            plt.text(
+                t, v, f"{v:.2f}",
+                fontsize=8, color="black", ha="center", va="bottom",
+                bbox=dict(facecolor="white", edgecolor="none", alpha=0.7, boxstyle="round,pad=0.2")
+            )
+
+    plt.xticks(rotation=45)
+    plt.title("USD/KRW Last 30 min")  # 영어 제목 유지
+    plt.xlabel("Time")
+    plt.ylabel("KRW")
+    plt.grid(True)
+
+    # ✅ 시작점, 종료점 강조
     def annotate_point(x, y, label, align="right"):
         ha = "right" if align == "right" else "left"
         size = 60 if align == "right" else 80
@@ -248,16 +314,6 @@ def generate_30min_chart(rates: list[tuple[datetime, float]]) -> BytesIO | None:
             bbox=dict(facecolor="white", edgecolor="gray", boxstyle="round,pad=0.2")
         )
 
-    # ✅ 차트 그리기
-    plt.figure(figsize=(6, 3))
-    plt.plot(times, values, marker="o", linewidth=2, color=color)
-    plt.xticks(rotation=45)
-    plt.title("USD/KRW Last 30 min")  # 영어 제목 유지
-    plt.xlabel("Time")
-    plt.ylabel("KRW")
-    plt.grid(True)
-
-    # ✅ 시작점, 종료점 강조
     annotate_point(times[0], values[0], round(values[0], 2), align="right")
     annotate_point(times[-1], values[-1], round(values[-1], 2), align="left")
 
@@ -270,3 +326,32 @@ def generate_30min_chart(rates: list[tuple[datetime, float]]) -> BytesIO | None:
 
     print(f"✅ 차트 생성 완료 (데이터 {len(values)}건)")
     return buf
+
+async def send_30min_summary_then_chart(
+    start_time: datetime,
+    end_time: datetime,
+    rates: list[tuple[datetime, float]],
+    major_events: Optional[list[str]],
+    send_text: Callable[[str], Awaitable[None]],
+    send_photo: Callable[[BytesIO], Awaitable[None]],
+    ensure_gap_ms: int = 150,
+) -> None:
+    """
+    텔레그램(또는 임의의 송신기)로 30분 요약 텍스트를 먼저 전송하고,
+    그 다음 차트를 전송하도록 보장하는 헬퍼.
+
+    - send_text: async callable(str) -> None (예: bot.send_message 래퍼)
+    - send_photo: async callable(BytesIO) -> None (예: bot.send_photo 래퍼)
+    - ensure_gap_ms: 메시지 간 최소 간격(ms)로, 클라이언트 정렬 문제 방지용
+    """
+    # 1) 텍스트 먼저 생성/전송
+    text = generate_30min_summary(start_time, end_time, rates, major_events)
+    await send_text(text)
+
+    # 2) 짧은 간격 후에 차트 생성/전송 (클라이언트 정렬 보장)
+    if ensure_gap_ms > 0:
+        await asyncio.sleep(ensure_gap_ms / 1000.0)
+
+    buf = generate_30min_chart(rates)
+    if buf is not None:
+        await send_photo(buf)

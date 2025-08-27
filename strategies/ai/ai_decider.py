@@ -94,3 +94,89 @@ def build_features(structs: Dict[str, tuple]) -> Dict[str, float]:
         agree = max(sum(1 for d in dirs if d > 0), sum(1 for d in dirs if d < 0))
     x["agree_count"] = float(agree)
     return x
+
+
+# --- LLM 기반 판단 보조 함수 ---
+import os, json
+from textwrap import dedent
+
+try:
+    from openai import OpenAI
+except Exception:
+    OpenAI = None
+
+def llm_decide_explain(
+    *,
+    structs: Dict[str, tuple],
+    ai_probs: Dict[str, float],
+    gate_action: str,
+    gate_reason: Optional[str] = None
+) -> Optional[Dict]:
+    """
+    외부 LLM을 호출해서 buy/sell/hold + 점수 + 이유를 JSON으로 반환.
+    실패하거나 비활성화면 None 반환.
+
+    반환 예시:
+    {
+        "action": "buy",
+        "score": 62,
+        "reasons": ["최근 급락과 하단 이탈이 동시 발생", "변동성 확대 국면"],
+        "headline": "상승 전환"
+    }
+    """
+    if os.getenv("USE_LLM_DECISION", "0") != "1":
+        return None
+    if OpenAI is None or not os.getenv("OPENAI_API_KEY"):
+        return None
+
+    sigs = {}
+    for k, (d, c, ev) in structs.items():
+        sigs[k] = {"direction": d, "confidence": round(float(c), 3), "evidence": ev[:240]}
+
+    payload = {
+        "signals": sigs,
+        "ai_probs": {k: round(float(v), 4) for k, v in (ai_probs or {}).items()},
+        "gate_action": gate_action,
+        "gate_reason": gate_reason or "",
+    }
+
+    sys_msg = dedent("""
+        당신은 한국어로 응답하는 외환 트레이딩 보조 AI입니다.
+        - 최종 전망을 buy/sell/hold 중 하나로 고르세요.
+        - 2~3가지 핵심 이유를 간결히 bullet로 제시하세요.
+        - 점수는 0~100 정수.
+        - JSON만 반환: {"action":"buy|sell|hold","score":55,"reasons":["...","..."],"headline":"선택사항"}
+    """).strip()
+
+    user_msg = f"입력 신호:\n{json.dumps(payload, ensure_ascii=False)}"
+
+    model = os.getenv("LLM_DECISION_MODEL", os.getenv("LLM_SUMMARY_MODEL", "gpt-4o-mini"))
+    max_tokens = int(os.getenv("LLM_DECISION_MAXTOK", 200))
+
+    try:
+        client = OpenAI()
+        resp = client.responses.create(
+            model=model,
+            input=f"SYSTEM:\n{sys_msg}\n\nUSER:\n{user_msg}",
+            reasoning={ "effort": "medium" },
+            text={ "verbosity": "medium" },
+        )
+        text = getattr(resp, "output_text", "") or ""
+        if not text.strip():
+            return None
+        if not text.strip().startswith("{"):
+            s, e = text.find("{"), text.rfind("}")
+            if s != -1 and e != -1 and e > s:
+                text = text[s:e+1]
+        data = json.loads(text)
+        action = str(data.get("action", "")).lower()
+        if action not in ("buy", "sell", "hold"):
+            return None
+        return {
+            "action": action,
+            "score": int(data.get("score", 0)),
+            "reasons": [str(r)[:200] for r in (data.get("reasons") or [])],
+            "headline": str(data.get("headline") or "")
+        }
+    except Exception:
+        return None

@@ -6,7 +6,9 @@ from db.repository import (
     get_rates_in_block, store_rate, get_recent_rates, store_expected_range,
     get_today_expected_range, get_recent_rates_for_summary
 )
+from decision import make_decision
 from strategies.summary import get_recent_major_events
+from strategies.utils.signal_utils import atr_from_rates
 from utils import is_weekend, now_kst, is_scrape_time
 from fetcher import get_usdkrw_rate, fetch_expected_range
 from notifier import send_telegram, send_start_message, send_photo
@@ -14,16 +16,49 @@ from strategies import (
     analyze_bollinger,
     analyze_jump,
     analyze_crossover,
-    analyze_combo,
     analyze_expected_range,
     check_breakout_reversals,
     generate_30min_summary,
-    generate_30min_chart
+    generate_30min_chart,
+    send_30min_summary_then_chart
 )
 from utils.time import get_recent_completed_30min_block
+from strategies.trend_events import detect_and_format_10min_trend_event
+
 
 # 글로벌 상태 변수
 last_summary_sent = None
+
+
+# ▶️ One-off 30m summary runner
+async def run_summary_once(db_pool):
+    """Fetch the most recent completed 30m block and send summary + chart once."""
+    now = now_kst()
+    current = now_kst()
+    block_start, block_end = get_recent_completed_30min_block(current)
+    print(f"[${now}] ▶️ 임시 30분 요약 실행: {block_start.strftime('%H:%M')} ~ {block_end.strftime('%H:%M')}")
+    async with db_pool.acquire() as conn:
+        recent_rates = await get_rates_in_block(conn, block_start, block_end)
+        if not recent_rates:
+            print(f"[${now}] ⏸️ 데이터 부족: {block_start.strftime('%H:%M')} ~ {block_end.strftime('%H:%M')}")
+            return
+        major_events = await get_recent_major_events(conn, block_end)
+        # 텍스트 → 차트 순 전송 보장
+        async def _send_text(msg: str):
+            await send_telegram(msg)
+        async def _send_photo(buf):
+            await send_photo(buf)
+
+        await send_30min_summary_then_chart(
+            start_time=block_start,
+            end_time=block_end,
+            rates=recent_rates,
+            major_events=major_events,
+            send_text=_send_text,
+            send_photo=_send_photo,
+            ensure_gap_ms=150,
+        )
+        print(f"[${now}] ✅ 임시 요약/차트 전송 완료 ({block_end.strftime('%H:%M')})")
 
 
 async def run_watcher(db_pool):
@@ -52,6 +87,7 @@ async def run_watcher(db_pool):
         "type": None,
         "b_status": None,
     }
+    startup_mute_crossover = True
 
     try:
         while True:
@@ -93,6 +129,20 @@ async def run_watcher(db_pool):
                         await store_rate(conn, rate)
 
                         rates = await get_recent_rates(conn, LONG_TERM_PERIOD)
+                        # Compute ATR (close-only fallback) for gating context
+                        atr_val = None
+                        try:
+                            closes = [r[1] if isinstance(r, (list, tuple)) else float(r) for r in rates]
+                        except Exception:
+                            closes = rates
+                        if closes and len(closes) >= 15:
+                            atr_val = atr_from_rates([], [], closes, period=14)
+
+                            # 10분 추세 이벤트 감지
+                            trend_msg = await detect_and_format_10min_trend_event(conn, now, atr_val)
+                            if trend_msg:
+                                await send_telegram(trend_msg)
+
                         reversal_msgs = await check_breakout_reversals(conn, rate, now)
                         for r_msg in reversal_msgs:
                             await send_telegram(r_msg)
@@ -123,10 +173,15 @@ async def run_watcher(db_pool):
                         )
                         temp_state["b_status"] = b_status
 
-                        single_msgs = [msg for msg in [j_msg, c_msg, e_msg] if msg]
+                        # 부팅 직후에는 크로스오버 알림(상태 유지/전환)을 한 번 무음 처리
+                        if startup_mute_crossover:
+                            single_msgs = [msg for msg in [j_msg, e_msg] if msg]
+                        else:
+                            single_msgs = [msg for msg in [j_msg, c_msg, e_msg] if msg]
+
                         single_msgs.extend(b_msgs)
 
-                        combo_result = analyze_combo(
+                        decision_result = make_decision(
                             b_status,
                             b_msgs[0] if b_msgs else None,
                             j_msg,
@@ -140,17 +195,24 @@ async def run_watcher(db_pool):
                             j_struct=j_struct,
                             c_struct=c_struct,
                             e_struct=e_struct,
+                            # context for gates/decider
+                            current_price=rate,
+                            current_atr=atr_val,
+                            near_event=False,
                         )
 
-                        if combo_result:
-                            prev_upper_level = combo_result["new_upper_level"]
-                            prev_lower_level = combo_result["new_lower_level"]
-                            await send_telegram(combo_result["message"])
+                        if decision_result:
+                            prev_upper_level = decision_result["new_upper_level"]
+                            prev_lower_level = decision_result["new_lower_level"]
+                            await send_telegram(decision_result["message"])
                         else:
                             for msg in single_msgs:
                                 await send_telegram(msg)
 
                         prev_rate = rate
+                        # 최초 루프 완료 후 크로스오버 무음 해제
+                        if startup_mute_crossover:
+                            startup_mute_crossover = False
 
                         # ✅ 현재 시각 확보 (로그 및 elapsed 시간 출력용)
                         now = now_kst()
@@ -173,23 +235,22 @@ async def run_watcher(db_pool):
                                     if recent_rates:
                                         major_events = await get_recent_major_events(conn, block_end)
 
-                                        summary_msg = generate_30min_summary(
+                                        async def _send_text(msg: str):
+                                            await send_telegram(msg)
+                                        async def _send_photo(buf):
+                                            await send_photo(buf)
+
+                                        await send_30min_summary_then_chart(
                                             start_time=block_start,
                                             end_time=block_end,
                                             rates=recent_rates,
-                                            major_events=major_events
+                                            major_events=major_events,
+                                            send_text=_send_text,
+                                            send_photo=_send_photo,
+                                            ensure_gap_ms=150,
                                         )
-                                        await send_telegram(summary_msg)
-
-                                        chart_buf = generate_30min_chart(recent_rates)
-                                        if chart_buf and chart_buf.getbuffer().nbytes > 0:
-                                            await send_photo(chart_buf)
-                                            print(f"[{now}] ✅ 차트 전송 완료 ({block_end.strftime('%H:%M')})")
-                                        else:
-                                            print(f"[{now}] ⏸️ 차트 전송 취소: 데이터 부족 또는 생성 실패")
-
+                                        print(f"[{now}] ✅ 30분 요약/차트 전송 완료 ({block_start.strftime('%H:%M')} ~ {block_end.strftime('%H:%M')})")
                                         last_summary_sent = block_end
-                                        print(f"[{now}] ✅ 30분 요약 메시지 발송 완료 ({block_start.strftime('%H:%M')} ~ {block_end.strftime('%H:%M')})")
                                     else:
                                         print(f"[{now}] ⏸️ 30분 요약 생략: 최근 데이터 부족")
                                 except Exception as e:
@@ -198,6 +259,11 @@ async def run_watcher(db_pool):
                                 print(f"[{now}] ⏸️ 이미 {block_end.strftime('%H:%M')} 블록 발송 완료, 생략")
                         else:
                             print(f"[{now}] ⏸️ 요약 조건 미충족 (block_end={block_end.strftime('%H:%M')}, now={now.strftime('%H:%M:%S')})")
+                            # 추가: 항상 최신 블록 요약 실행
+                            # try:
+                            #     await run_summary_once(db_pool)
+                            # except Exception as e:
+                            #     print(f"[{now}] ❌ 루프 내 임시 요약 실행 실패: {e}")
 
 
                     else:

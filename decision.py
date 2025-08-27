@@ -1,7 +1,19 @@
 from typing import Optional, Dict, Tuple
 from strategies.utils.score_bar import make_score_gauge
 import math
-from strategies.ai_decider import AIDecider, build_features
+from strategies.ai.ai_decider import AIDecider, build_features, llm_decide_explain
+from strategies.decision_gates import decide_with_gates, PriceCtx
+from utils.message_templates import build_combo_message
+from strategies.utils.types import ComboResult
+from strategies.feedback import log_decision
+from datetime import datetime, timedelta
+from config import COOLDOWN_SECONDS, DEBOUNCE_REQUIRED, HYSTERESIS_P_DELTA, HYSTERESIS_AGREE_DELTA
+
+# Module-level state for debounce/cooldown
+_last_action: str | None = None      # 'buy'|'sell'|'hold'
+_last_action_time: datetime | None = None
+_prev_ai_action: str | None = None   # 직전 틱의 AI 1차 판단
+_prev_same_count: int = 0
 
 # === 가중치 설정 (환경에 따라 조정 가능) ===
 WEIGHTS: Dict[str, float] = {
@@ -70,7 +82,7 @@ def _score_to_pct(signed_score: float) -> int:
     return int(round(50 + 45 * math.tanh(signed_score / 0.6)))
 
 
-def analyze_combo(
+def make_decision(
     b_status: Optional[str],
     b_msg: Optional[str],
     j_msg: Optional[str],
@@ -85,6 +97,11 @@ def analyze_combo(
     j_struct: Optional[dict] = None,
     c_struct: Optional[dict] = None,
     e_struct: Optional[dict] = None,
+    # --- new optional runtime context ---
+    current_price: Optional[float] = None,
+    current_atr: Optional[float] = None,
+    near_event: bool = False,
+    prev_same_decision: Optional[bool] = None,
 ):
     """
     종합 콤보 분석
@@ -145,20 +162,85 @@ def analyze_combo(
     if len(active_nonzero) < 2:
         return None
 
-    # === AI 기반 결론 ===
-    feats = build_features(structs)
-    ai_action, ai_probs = AIDecider().predict(feats)
+    # === AI 기반 결론 + 게이트 적용 ===
+    global _last_action, _last_action_time, _prev_ai_action, _prev_same_count
 
-    if ai_action == "buy":
-        signal_type = "상승 전환"
-        pct = int(round(100 * ai_probs.get("buy", 0.0)))
-    elif ai_action == "sell":
-        signal_type = "하락 전환"
-        pct = int(round(100 * ai_probs.get("sell", 0.0)))
+    feats = build_features(structs)
+    ai_action, ai_probs = AIDecider().predict(feats)   # 'buy'|'sell'|'hold'
+
+    # 실제 런타임 컨텍스트 연결 (가격/ATR/이벤트/연속판단)
+    if prev_same_decision is None:
+        prev_same_decision = (_prev_ai_action == ai_action)
+    ctx = PriceCtx(price=current_price, atr=current_atr, near_event=near_event, prev_same_decision=bool(prev_same_decision))
+
+    # 게이트 통과 여부 (가격/ATR/이벤트 컨텍스트가 생기면 ctx 채워 넣기)
+    gate_action, gate_reason = decide_with_gates(structs, ai_probs, ctx)
+
+    # 히스테리시스: 직전 확정 행동과 반대 전환이면 추가 확신 요구
+    if gate_action in ("buy", "sell") and _last_action in ("buy", "sell") and gate_action != _last_action:
+        p_top = ai_probs.get(gate_action, 0.0)
+        # 보수적: 기본 0.60에 여유(HYSTERESIS_P_DELTA) 추가 요구
+        if p_top < (0.60 + HYSTERESIS_P_DELTA):
+            gate_action = "hold"
+            gate_reason = "히스테리시스(추가 확신 대기)"
+
+    now = datetime.now()
+
+    # 디바운스: 전환 시 연속 동일 판단 필요
+    if gate_action in ("buy", "sell"):
+        if _prev_ai_action == gate_action:
+            _prev_same_count += 1
+        else:
+            _prev_same_count = 1
+        _prev_ai_action = gate_action
+
+        need_same = max(1, DEBOUNCE_REQUIRED)
+        if _prev_same_count < need_same:
+            # 관망으로 예고 전환만 알림
+            signal_type = "관망"
+            pct = int(round(100 * ai_probs.get("hold", 0.0)))
+            gate_reason = "전환 조짐(연속확인 대기)"
+            # 관망 메시지로 진행
+        else:
+            # 쿨다운: 같은 방향 재발송 제한
+            if _last_action == gate_action and _last_action_time and (now - _last_action_time) < timedelta(seconds=COOLDOWN_SECONDS):
+                return None
+            # 확정 방향 채택
+            signal_type = "상승 전환" if gate_action == "buy" else "하락 전환"
+            pct = int(round(100 * ai_probs.get(gate_action, 0.0)))
+            _last_action = gate_action
+            _last_action_time = now
     else:
-        # 관망 결론도 메시지로 발송 (활성 신호는 있었으나 확신 부족)
+        # 게이트 사유에 따른 관망
         signal_type = "관망"
         pct = int(round(100 * ai_probs.get("hold", 0.0)))
+        # 디바운스 카운트 리셋
+        _prev_ai_action = "hold"
+        _prev_same_count = 0
+
+    # === LLM 결론/설명 (선택) ===
+    ai_reason_lines: list[str] = []
+    try:
+        llm_out = llm_decide_explain(
+            structs=structs,
+            ai_probs=ai_probs,
+            gate_action=("buy" if signal_type == "상승 전환" else ("sell" if signal_type == "하락 전환" else "hold")),
+            gate_reason=gate_reason if 'gate_reason' in locals() else None,
+        )
+    except Exception:
+        llm_out = None
+
+    if llm_out:
+        llm_action = (llm_out.get("action") or "").lower()
+        llm_score = llm_out.get("score")
+        # 게이트/디바운스 로직은 유지하고, 표시용 액션/점수만 LLM으로 보강
+        if llm_action in ("buy", "sell", "hold"):
+            signal_type = {"buy": "상승 전환", "sell": "하락 전환", "hold": "관망"}[llm_action]
+        if isinstance(llm_score, int):
+            pct = max(0, min(100, llm_score))
+        reasons = llm_out.get("reasons") or []
+        if reasons:
+            ai_reason_lines = ["🧠 전망 이유 (AI)"] + [f"- {r}" for r in reasons[:3]]
 
     # === 결론 헤드라인 (사고/파는 의미가 명확한 아이콘으로 교체) ===
     headline = {
@@ -182,6 +264,12 @@ def analyze_combo(
             continue
         bullets.append(f"- {key_emojis.get(key, '•')} {ev}")
 
+    # 관망 사유를 최초 라인에 표시 (있을 경우)
+    if signal_type == "관망":
+        reason = gate_reason if 'gate_reason' in locals() else None
+        if reason:
+            bullets = [f"- ℹ️ {reason}"] + bullets
+
     # === 점수 게이지 (매수=파란색, 매도=빨간색, 관망=회색) ===
     # 신호 라벨 (게이지 타이틀용)
     strength_title = {
@@ -191,12 +279,16 @@ def analyze_combo(
 
     gauge_line = make_score_gauge(headline, pct)
 
-    message = (
-        f"{header_line}\n\n"
-        f"📌 핵심 근거\n" + ("\n".join(bullets) if bullets else "- (근거 없음)") + "\n\n"
-        f"{strength_title}\n"
-        f"{gauge_line}"
-    )
+    parts = [header_line, ""]
+    if ai_reason_lines:
+        parts.append("\n".join(ai_reason_lines))
+        parts.append("")
+    parts.append("📌 핵심 근거")
+    parts.append("\n".join(bullets) if bullets else "- (근거 없음)")
+    parts.append("")
+    parts.append(strength_title)
+    parts.append(gauge_line)
+    message = "\n".join(parts)
 
     # 레벨 업데이트 (기본 로직 유지)
     new_upper_level = prev_upper_level

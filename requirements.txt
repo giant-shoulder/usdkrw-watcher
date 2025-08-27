@@ -20,3 +20,6 @@ typing_extensions==4.13.2
 
 # 데이터 분석/통계
 matplotlib>=3.7.0
+
+# OpenAI LLM
+openai>=1.0.0

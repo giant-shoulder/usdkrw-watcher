@@ -35,7 +35,7 @@ EPSILON = 0.005                     # 단기/장기 평균선 동등 판단 오�
 SPREAD_DIFF_THRESHOLD = 0.12        # 유지 상태 추세 강화/약화 판단 기준
 PRICE_GAP_THRESHOLD = 1.0           # 유지 상태 가격 변화 판단 기준
 MIN_REPORT_INTERVAL = 900           # 유지 상태 의미 있는 변화 보고 최소 간격(15분)
-REMINDER_INTERVAL = 3600            # 유지 상태 리마인드 주기(1시간)
+REMINDER_INTERVAL = 1800            # 유지 상태 리마인드 주기(30분)
 
 # 📊 전략별 점수 가중치
 SIGNAL_WEIGHTS = {
@@ -54,3 +54,10 @@ if os.path.exists(".env"):
     ENVIRONMENT = os.getenv("ENVIRONMENT", "local")
 else:
     ENVIRONMENT = "production"
+
+
+# === Decision pipeline defaults ===
+COOLDOWN_SECONDS = 600          # 같은 방향 재발송 최소 간격(초) ≈ 3틱
+DEBOUNCE_REQUIRED = 2           # 서로 다른 방향 전환 시 연속 동일 판단 필요 틱 수
+HYSTERESIS_P_DELTA = 0.05       # 반전/취소 시 추가 요구 확률
+HYSTERESIS_AGREE_DELTA = 1      # 반전/취소 시 추가 요구 합의 개수
