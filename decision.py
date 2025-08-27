@@ -219,7 +219,6 @@ def make_decision(
         _prev_same_count = 0
 
     # === LLM 결론/설명 (선택) ===
-    ai_reason_lines: list[str] = []
     try:
         llm_out = llm_decide_explain(
             structs=structs,
@@ -230,6 +229,7 @@ def make_decision(
     except Exception:
         llm_out = None
 
+    llm_reasons: list[str] = []
     if llm_out:
         llm_action = (llm_out.get("action") or "").lower()
         llm_score = llm_out.get("score")
@@ -238,16 +238,7 @@ def make_decision(
             signal_type = {"buy": "상승 전환", "sell": "하락 전환", "hold": "관망"}[llm_action]
         if isinstance(llm_score, int):
             pct = max(0, min(100, llm_score))
-        reasons = llm_out.get("reasons") or []
-        if reasons:
-            ai_reason_lines = ["🧠 전망 이유 (AI)"] + [f"- {r}" for r in reasons[:3]]
-
-    # === 결론 헤드라인 (사고/파는 의미가 명확한 아이콘으로 교체) ===
-    headline = {
-        "상승 전환": "🔴 🛒 매수 (Buy)",   # KR convention: 상승=빨강
-        "하락 전환": "🔵 💸 매도 (Sell)",  # KR convention: 하락=파랑
-    }.get(signal_type, "⚪ ⏸ 관망 (Hold)")
-    header_line = f"*{headline} ({pct}/100)*"
+        llm_reasons = [str(r) for r in (llm_out.get("reasons") or [])][:3]
 
     # === 핵심 근거 상위 2~3개 선별 ===
     key_emojis = {"boll": "📊", "cross": "🔁", "jump": "⚡", "expected": "📡"}
@@ -258,17 +249,25 @@ def make_decision(
     contribs.sort(reverse=True)
     top = contribs[:3]
 
-    bullets = []
+    factual_bullets = []
     for _score, key, ev in top:
         if not ev:
             continue
-        bullets.append(f"- {key_emojis.get(key, '•')} {ev}")
+        factual_bullets.append(f"- {key_emojis.get(key, '•')} {ev}")
 
-    # 관망 사유를 최초 라인에 표시 (있을 경우)
-    if signal_type == "관망":
+    # LLM 이유가 없는 경우에만 관망 사유를 추가
+    bullets = []
+    if not llm_out and signal_type == "관망":
         reason = gate_reason if 'gate_reason' in locals() else None
         if reason:
-            bullets = [f"- ℹ️ {reason}"] + bullets
+            bullets.append(f"- ℹ️ {reason}")
+
+    # === 결론 헤드라인 (사고/파는 의미가 명확한 아이콘으로 교체) ===
+    headline = {
+        "상승 전환": "🔴 🛒 매수 (Buy)",   # KR convention: 상승=빨강
+        "하락 전환": "🔵 💸 매도 (Sell)",  # KR convention: 하락=파랑
+    }.get(signal_type, "⚪ ⏸ 관망 (Hold)")
+    header_line = f"*{headline} ({pct}/100)*"
 
     # === 점수 게이지 (매수=파란색, 매도=빨간색, 관망=회색) ===
     # 신호 라벨 (게이지 타이틀용)
@@ -280,11 +279,23 @@ def make_decision(
     gauge_line = make_score_gauge(headline, pct)
 
     parts = [header_line, ""]
-    if ai_reason_lines:
-        parts.append("\n".join(ai_reason_lines))
-        parts.append("")
+
     parts.append("📌 핵심 근거")
-    parts.append("\n".join(bullets) if bullets else "- (근거 없음)")
+    if llm_out and llm_reasons:
+        parts.append("\n".join(f"- {r}" for r in llm_reasons))
+    else:
+        # LLM 불가 시 기존 bullet 사용
+        if bullets:
+            parts.append("\n".join(bullets))
+        else:
+            parts.append("- (근거 없음)")
+
+    # 사실관계는 항상 별도 섹션으로 덧붙임
+    if factual_bullets:
+        parts.append("")
+        parts.append("📎 사실관계")
+        parts.append("\n".join(factual_bullets))
+
     parts.append("")
     parts.append(strength_title)
     parts.append(gauge_line)
