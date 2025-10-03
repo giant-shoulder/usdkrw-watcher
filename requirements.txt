@@ -23,3 +23,5 @@ matplotlib>=3.7.0
 
 # OpenAI LLM
 openai>=1.0.0
+
+holidays>=0.50

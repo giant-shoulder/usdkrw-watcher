@@ -1,6 +1,7 @@
 from datetime import datetime, time, date, timedelta
 import pytz
 from config import ENVIRONMENT
+import holidays
 
 TIMEZONE = pytz.timezone("Asia/Seoul")
 
@@ -60,12 +61,21 @@ def is_exact_time(hour: int, minute: int) -> bool:
 def is_scrape_time(last_scraped: date | None = None) -> bool:
     """
     오전 11시대에 해당하며 오늘 아직 스크랩하지 않았다면 True 반환
+    - 주말, 한국 공휴일은 제외
     """
     now = now_kst()
     today = now.date()
 
-    if now.weekday() >= 5:  # 주말 제외
+    # 주말 제외
+    if now.weekday() >= 5:
         return False
+
+    # 한국 공휴일 제외
+    kr_holidays = holidays.KR(years=today.year)
+    if today in kr_holidays:
+        return False
+
+    # 11시대이고 오늘 아직 스크랩하지 않았을 때
     if 11 <= now.hour < 12:
         if last_scraped is None or last_scraped != today:
             return True
