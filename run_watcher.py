@@ -121,7 +121,7 @@ async def run_watcher(db_pool):
                         except Exception as e:
                             err_msg = f"⚠️ 예상 범위 스크래핑 실패: {e}"
                             print(err_msg)
-                            # await send_telegram(err_msg, target_chat_ids=["7650730456"])
+                            await send_telegram(err_msg, target_chat_ids=["7650730456"])
 
                     rate = get_usdkrw_rate()
                     if rate:
