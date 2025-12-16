@@ -3,32 +3,84 @@ from bs4 import BeautifulSoup
 import re
 from datetime import datetime
 import pytz
+import time as pytime
+from typing import Optional
 
 def fetch_expected_range():
     """
     연합인포맥스에서 '오늘 외환딜러 환율 예상레인지' 기사를 스크래핑하여
     가장 넓은 환율 범위를 반환합니다.
     """
-    headers = {"User-Agent": "Mozilla/5.0"}
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Referer": "https://news.einfomax.co.kr/",
+        "Connection": "keep-alive",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
+    }
     search_url = (
         "https://news.einfomax.co.kr/news/articleList.html?sc_area=A&view_type=sm&sc_word=%ED%99%98%EC%9C%A8+%EC%98%88%EC%83%81+%EB%A0%88%EC%9D%B8%EC%A7%80"
     )
 
-    # 1. 기사 검색 페이지 요청
-    res = requests.get(search_url, headers=headers)
+    session = requests.Session()
+
+    def _get(url: str, *, timeout: int = 15, retries: int = 3) -> requests.Response:
+        last_err: Optional[Exception] = None
+        for i in range(retries):
+            try:
+                r = session.get(url, headers=headers, timeout=timeout, allow_redirects=True)
+                # Some sites return 200 with block pages; keep a tiny heuristic
+                if r.status_code >= 400:
+                    r.raise_for_status()
+                return r
+            except Exception as e:
+                last_err = e
+                # small backoff
+                pytime.sleep(0.8 * (i + 1))
+        raise last_err  # type: ignore
+
+    res = _get(search_url)
     res.raise_for_status()
     soup = BeautifulSoup(res.text, "html.parser")
 
-    # 2. 최신 기사 링크 추출
-    article_tag = soup.select_one("ul.type2 li a")
-    if not article_tag or not article_tag.get("href"):
-        raise ValueError("❌ 기사 링크를 찾을 수 없습니다.")
-    article_url = "https://news.einfomax.co.kr" + article_tag["href"]
+    # 2. 최신 기사 링크 추출 (배포 환경에서 HTML 구조/차단 페이지 대응)
+    article_tag = (
+        soup.select_one("ul.type2 li a")
+        or soup.select_one("ul.type1 li a")
+        or soup.select_one("div#section-list li a")
+        or soup.select_one("div.list li a")
+        or soup.select_one("div.listing li a")
+    )
 
-    # 3. 기사 본문 요청
-    article_res = requests.get(article_url, headers=headers)
+    href = article_tag.get("href") if article_tag else None
+    if not href:
+        # Railway/클라우드 환경에서 차단/리다이렉트/비정상 HTML인지 빠르게 확인할 수 있게 일부 출력
+        snippet = soup.get_text("\n", strip=True)[:400]
+        print("[EXPECTED_RANGE] search page status=", res.status_code)
+        print("[EXPECTED_RANGE] search page snippet=", snippet)
+        raise ValueError("❌ 기사 링크를 찾을 수 없습니다.")
+
+    # 절대/상대 URL 모두 처리
+    if href.startswith("http"):
+        article_url = href
+    else:
+        article_url = "https://news.einfomax.co.kr" + href
+
+    article_res = _get(article_url)
     article_res.raise_for_status()
     article_soup = BeautifulSoup(article_res.text, "html.parser")
+
+    # 배포 환경에서 종종 200으로 차단 페이지가 내려오는 경우가 있어, 본문이 비정상적으로 짧으면 차단 의심
+    body_text = article_soup.get_text("\n", strip=True)
+    if len(body_text) < 300:
+        print("[EXPECTED_RANGE] article page status=", article_res.status_code)
+        print("[EXPECTED_RANGE] article page snippet=", body_text[:400])
 
     # 4. 기사 날짜 확인
     meta_time = article_soup.find("meta", {"property": "article:published_time"})
@@ -41,7 +93,7 @@ def fetch_expected_range():
         raise ValueError(f"📅 오늘 기사 아님: {article_date}")
 
     # 5. 전체 기사 텍스트 추출
-    full_text = article_soup.get_text(separator="\n", strip=True)
+    full_text = body_text
 
     # 6. 정규식으로 예상 레인지 추출 (쉼표 포함 숫자 대응)
     range_matches = re.findall(
