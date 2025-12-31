@@ -1,4 +1,4 @@
-import requests
+from curl_cffi import requests # 변경
 from bs4 import BeautifulSoup
 import re
 from datetime import datetime
@@ -7,45 +7,47 @@ import time as pytime
 from typing import Optional
 
 def fetch_expected_range():
-    """
-    연합인포맥스에서 '오늘 외환딜러 환율 예상레인지' 기사를 스크래핑하여
-    가장 넓은 환율 범위를 반환합니다.
-    """
+    # 헤더는 그대로 두거나 최소화해도 됨 (impersonate가 알아서 처리함)
     headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/120.0.0.0 Safari/537.36"
-        ),
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
         "Referer": "https://news.einfomax.co.kr/",
-        "Connection": "keep-alive",
-        "Cache-Control": "no-cache",
-        "Pragma": "no-cache",
     }
+    
     search_url = (
         "https://news.einfomax.co.kr/news/articleList.html?sc_area=A&view_type=sm&sc_word=%ED%99%98%EC%9C%A8+%EC%98%88%EC%83%81+%EB%A0%88%EC%9D%B8%EC%A7%80"
     )
 
+    # requests.Session() 대신 curl_cffi 사용
     session = requests.Session()
 
-    def _get(url: str, *, timeout: int = 15, retries: int = 3) -> requests.Response:
+    def _get(url: str, *, timeout: int = 15, retries: int = 3):
         last_err: Optional[Exception] = None
         for i in range(retries):
             try:
-                r = session.get(url, headers=headers, timeout=timeout, allow_redirects=True)
-                # Some sites return 200 with block pages; keep a tiny heuristic
+                # impersonate="chrome" 옵션이 핵심입니다.
+                r = session.get(
+                    url, 
+                    headers=headers, 
+                    impersonate="chrome", 
+                    timeout=timeout, 
+                    allow_redirects=True
+                )
                 if r.status_code >= 400:
                     r.raise_for_status()
                 return r
             except Exception as e:
                 last_err = e
-                # small backoff
-                pytime.sleep(0.8 * (i + 1))
-        raise last_err  # type: ignore
+                print(f"Retry {i+1} failed: {e}")
+                pytime.sleep(1)
+        raise last_err
 
+    # ... (나머지 로직은 동일) ...
     res = _get(search_url)
+    
+    # 디버깅용 로그 (배포 환경에서 확인용)
+    if "예상" not in res.text and "레인지" not in res.text:
+        print(f"⚠️ 경고: 검색 결과 페이지가 의심스럽습니다. Status: {res.status_code}")
+        # print(res.text[:500]) # HTML 앞부분 확인
     res.raise_for_status()
     soup = BeautifulSoup(res.text, "html.parser")
 
