@@ -78,11 +78,46 @@ def fetch_expected_range():
     article_res.raise_for_status()
     article_soup = BeautifulSoup(article_res.text, "html.parser")
 
-    # 배포 환경에서 종종 200으로 차단 페이지가 내려오는 경우가 있어, 본문이 비정상적으로 짧으면 차단 의심
-    body_text = article_soup.get_text("\n", strip=True)
+    def _extract_article_text(soup: BeautifulSoup) -> str:
+        """Extract main article text as reliably as possible.
+
+        Einfomax pages sometimes include a lot of navigation/boilerplate; also some environments
+        may receive a 'block/interstitial' HTML with 200. We try common article containers first.
+        """
+        candidates = [
+            "div#article-view-content-div",          # common on many Korean news CMS
+            "div#articleBody",                      # fallback
+            "section#article-view-content-div",     # variant
+            "div.article-body",                     # generic
+            "div.view_cont",                        # generic
+            "article",                              # last resort
+        ]
+        for sel in candidates:
+            el = soup.select_one(sel)
+            if el:
+                txt = el.get_text("\n", strip=True)
+                if txt and len(txt) > 200:
+                    return txt
+        return soup.get_text("\n", strip=True)
+
+    def _debug_context(text: str, keyword: str, width: int = 200) -> str:
+        i = text.find(keyword)
+        if i < 0:
+            return ""
+        start = max(0, i - width)
+        end = min(len(text), i + len(keyword) + width)
+        return text[start:end]
+
+    body_text = _extract_article_text(article_soup)
+
+    # 배포 환경에서 종종 200으로 차단/안내 페이지가 내려오는 경우가 있어, 본문이 비정상적으로 짧으면 차단 의심
     if len(body_text) < 300:
         print("[EXPECTED_RANGE] article page status=", article_res.status_code)
         print("[EXPECTED_RANGE] article page snippet=", body_text[:400])
+
+    # Railway에서만 재현되는 '정상 200인데 내용이 다른' 케이스를 빠르게 판별
+    if ("접근" in body_text and "차단" in body_text) or ("Forbidden" in body_text) or ("Cloudflare" in body_text):
+        print("[EXPECTED_RANGE] ⚠️ possible block/interstitial page detected")
 
     # 4. 기사 날짜 확인
     meta_time = article_soup.find("meta", {"property": "article:published_time"})
@@ -97,13 +132,41 @@ def fetch_expected_range():
     # 5. 전체 기사 텍스트 추출
     full_text = body_text
 
-    # 6. 정규식으로 예상 레인지 추출 (쉼표 포함 숫자 대응)
-    range_matches = re.findall(
-        r"예상\s*레인지\s*[:：]?\s*([\d,\.]+)\s*[~\-]\s*([\d,\.]+)",
-        full_text
-    )
+    # 6. 정규식으로 예상 레인지 추출 (표기 변형 대응)
+    # - '예상 레인지', '예상레인지', '예상 범위', '예상환율 레인지' 등
+    # - 구분자: ~, -, –
+    # - 단위: '원' 유무
+    patterns = [
+        r"예상\s*(?:환율\s*)?(?:레인지|범위)\s*[:：]?\s*([\d,\.]+)\s*[~\-–]\s*([\d,\.]+)\s*원?",
+        r"(?:레인지|범위)\s*[:：]?\s*([\d,\.]+)\s*[~\-–]\s*([\d,\.]+)\s*원?\s*(?:로|으로)?\s*예상",
+    ]
+
+    range_matches = []
+    for pat in patterns:
+        found = re.findall(pat, full_text)
+        if found:
+            range_matches.extend(found)
+
     if not range_matches:
-        raise ValueError("❌ 예상 환율 범위를 찾을 수 없습니다.")
+        # Debug: Railway에서 본문은 받아왔는데 키워드/형식이 달라 실패하는 케이스
+        ctx1 = _debug_context(full_text, "예상", 250)
+        ctx2 = _debug_context(full_text, "레인지", 250)
+        ctx3 = _debug_context(full_text, "범위", 250)
+        print("[EXPECTED_RANGE] ❌ regex miss - contexts:")
+        if ctx1:
+            print("[EXPECTED_RANGE] ...around '예상'...\n", ctx1)
+        if ctx2:
+            print("[EXPECTED_RANGE] ...around '레인지'...\n", ctx2)
+        if ctx3:
+            print("[EXPECTED_RANGE] ...around '범위'...\n", ctx3)
+
+        # Fallback: 키워드가 있는 경우, 주변에서 '숫자~숫자' 형태를 한 번 더 탐색
+        window_text = "\n".join([t for t in [ctx1, ctx2, ctx3] if t]) or full_text
+        fallback = re.findall(r"([\d,\.]{3,})\s*[~\-–]\s*([\d,\.]{3,})", window_text)
+        if fallback:
+            range_matches = fallback
+        else:
+            raise ValueError("❌ 예상 환율 범위를 찾을 수 없습니다.")
 
     # 7. 쉼표 제거 및 float 변환
     ranges = []
