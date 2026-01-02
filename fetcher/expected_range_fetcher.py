@@ -14,7 +14,7 @@ def fetch_expected_range():
     }
     
     search_url = (
-        "https://news.einfomax.co.kr/news/articleList.html?sc_area=A&view_type=sm&sc_word=%ED%99%98%EC%9C%A8+%EC%98%88%EC%83%81+%EB%A0%88%EC%9D%B8%EC%A7%80"
+        "https://news.einfomax.co.kr/news/articleList.html?sc_area=A&view_type=sm&sc_word=%ED%99%98%EC%9C%A8+%EC%98%88%EC%83%81"
     )
 
     # requests.Session() 대신 curl_cffi 사용
