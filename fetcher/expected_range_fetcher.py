@@ -51,32 +51,102 @@ def fetch_expected_range():
     res.raise_for_status()
     soup = BeautifulSoup(res.text, "html.parser")
 
-    # 2. 최신 기사 링크 추출 (배포 환경에서 HTML 구조/차단 페이지 대응)
-    article_tag = (
-        soup.select_one("ul.type2 li a")
-        or soup.select_one("ul.type1 li a")
-        or soup.select_one("div#section-list li a")
-        or soup.select_one("div.list li a")
-        or soup.select_one("div.listing li a")
-    )
+    # 2. 검색 결과에서 기사 후보 링크 여러 개 수집 (배포 환경에서 첫 번째가 무관/유료(단말기) 기사일 수 있음)
+    def _normalize_article_url(href: str) -> str:
+        if not href:
+            return ""
+        href = href.strip()
+        if href.startswith("http"):
+            return href
+        return "https://news.einfomax.co.kr" + href
 
-    href = article_tag.get("href") if article_tag else None
-    if not href:
-        # Railway/클라우드 환경에서 차단/리다이렉트/비정상 HTML인지 빠르게 확인할 수 있게 일부 출력
+    # 가능한 목록 셀렉터들에서 a[href]를 최대한 많이 모은다.
+    link_selectors = [
+        "ul.type2 li a[href]",
+        "ul.type1 li a[href]",
+        "div#section-list li a[href]",
+        "div.list li a[href]",
+        "div.listing li a[href]",
+        "div.article-list a[href]",
+        "a[href*='/news/articleView.html']",
+    ]
+
+    candidates: list[str] = []
+    for sel in link_selectors:
+        for a in soup.select(sel):
+            href = a.get("href")
+            url = _normalize_article_url(href)
+            if not url:
+                continue
+            # 중복 제거
+            if url not in candidates:
+                candidates.append(url)
+
+    if not candidates:
         snippet = soup.get_text("\n", strip=True)[:400]
         print("[EXPECTED_RANGE] search page status=", res.status_code)
         print("[EXPECTED_RANGE] search page snippet=", snippet)
         raise ValueError("❌ 기사 링크를 찾을 수 없습니다.")
 
-    # 절대/상대 URL 모두 처리
-    if href.startswith("http"):
-        article_url = href
-    else:
-        article_url = "https://news.einfomax.co.kr" + href
+    # 검색 결과 페이지가 의심스러울 때(키워드 미포함/차단 HTML) 후보를 더 넓게 잡되 로그 남김
+    if "예상" not in res.text and "레인지" not in res.text and "범위" not in res.text:
+        print(f"⚠️ 경고: 검색 결과 페이지가 의심스럽습니다. Status: {res.status_code}")
 
-    article_res = _get(article_url)
-    article_res.raise_for_status()
-    article_soup = BeautifulSoup(article_res.text, "html.parser")
+    # 3. 후보 기사들을 순회하며 '예상 레인지/범위' 패턴이 실제로 존재하는 기사만 채택
+    #    (유료 단말기 안내 문구/무관 기사/차단 페이지는 스킵)
+    PAYWALL_HINTS = [
+        "인포맥스 금융정보 단말기",
+        "무단전재",
+        "AI 학습 및 활용 금지",
+    ]
+
+    article_url = None
+    article_soup = None
+    body_text = None
+
+    max_probe = min(12, len(candidates))
+    for idx, url in enumerate(candidates[:max_probe], start=1):
+        try:
+            print(f"[EXPECTED_RANGE] probe {idx}/{max_probe}: {url}")
+            r = _get(url)
+            r.raise_for_status()
+            s = BeautifulSoup(r.text, "html.parser")
+
+            # 본문 텍스트 추출
+            tmp_body = None
+            try:
+                tmp_body = _extract_article_text(s)
+            except Exception:
+                tmp_body = s.get_text("\n", strip=True)
+
+            # 유료/단말기 안내 페이지는 스킵
+            if any(hint in (tmp_body or "") for hint in PAYWALL_HINTS) and "예상" not in (tmp_body or ""):
+                print("[EXPECTED_RANGE] skip: paywall/terminal-only or irrelevant")
+                continue
+
+            # 범위 패턴을 기사별로 선검증 (regex는 아래에서 동일 patterns로 재사용)
+            probe_text = tmp_body or ""
+            probe_patterns = [
+                r"예상\s*(?:환율\s*)?(?:레인지|범위)",
+                r"환율\s*예상\s*(?:레인지|범위)",
+            ]
+            if not any(re.search(p, probe_text) for p in probe_patterns):
+                print("[EXPECTED_RANGE] skip: keyword pattern not found")
+                continue
+
+            # 후보 채택
+            article_url = url
+            article_soup = s
+            body_text = tmp_body
+            break
+        except Exception as e:
+            print(f"[EXPECTED_RANGE] probe error: {type(e).__name__} - {e}")
+            continue
+
+    if not article_url or not article_soup:
+        raise ValueError("❌ 기사 링크를 찾았지만, 예상 레인지/범위 패턴이 있는 기사를 찾지 못했습니다.")
+
+    article_res = None  # 아래 코드에서 status/snippet 로깅용 변수를 유지하려면 None 처리
 
     def _extract_article_text(soup: BeautifulSoup) -> str:
         """Extract main article text as reliably as possible.
@@ -108,11 +178,10 @@ def fetch_expected_range():
         end = min(len(text), i + len(keyword) + width)
         return text[start:end]
 
-    body_text = _extract_article_text(article_soup)
-
     # 배포 환경에서 종종 200으로 차단/안내 페이지가 내려오는 경우가 있어, 본문이 비정상적으로 짧으면 차단 의심
     if len(body_text) < 300:
-        print("[EXPECTED_RANGE] article page status=", article_res.status_code)
+        status = getattr(article_res, "status_code", "n/a")
+        print("[EXPECTED_RANGE] article page status=", status)
         print("[EXPECTED_RANGE] article page snippet=", body_text[:400])
 
     # Railway에서만 재현되는 '정상 200인데 내용이 다른' 케이스를 빠르게 판별
@@ -121,9 +190,20 @@ def fetch_expected_range():
 
     # 4. 기사 날짜 확인
     meta_time = article_soup.find("meta", {"property": "article:published_time"})
-    if not meta_time or not meta_time.get("content"):
+    content = meta_time.get("content") if meta_time else None
+    if not content:
+        # fallback: try other common meta/name fields
+        meta_alt = (
+            article_soup.find("meta", {"name": "article:published_time"})
+            or article_soup.find("meta", {"name": "pubdate"})
+            or article_soup.find("meta", {"property": "og:updated_time"})
+        )
+        content = meta_alt.get("content") if meta_alt else None
+
+    if not content:
         raise ValueError("❌ 기사 날짜를 찾을 수 없습니다.")
-    article_date = datetime.strptime(meta_time["content"].split("T")[0], "%Y-%m-%d").date()
+
+    article_date = datetime.strptime(content.split("T")[0], "%Y-%m-%d").date()
 
     today = datetime.now(pytz.timezone("Asia/Seoul")).date()
     if article_date != today:
