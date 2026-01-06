@@ -13,8 +13,11 @@ def fetch_expected_range():
         "Referer": "https://news.einfomax.co.kr/",
     }
     
+    # 더 구체적인 키워드로 검색 (배포 환경에서 무관 기사/관련기사 묶음으로 빠지는 문제 방지)
+    # '오늘 외환딜러 환율 예상레인지' 코너를 직접 겨냥
     search_url = (
-        "https://news.einfomax.co.kr/news/articleList.html?sc_area=A&view_type=sm&sc_word=%ED%99%98%EC%9C%A8+%EC%98%88%EC%83%81"
+        "https://news.einfomax.co.kr/news/articleList.html?sc_area=A&view_type=sm&sc_word="
+        "%EC%98%A4%EB%8A%98+%EC%99%B8%ED%99%98%EB%94%9C%EB%9F%AC+%ED%99%98%EC%9C%A8+%EC%98%88%EC%83%81%EB%A0%88%EC%9D%B8%EC%A7%80"
     )
 
     # requests.Session() 대신 curl_cffi 사용
@@ -112,6 +115,39 @@ def fetch_expected_range():
                 txt = el.get_text("\n", strip=True)
                 if txt and len(txt) > 200:
                     return txt
+
+        # Fallback 1) meta description / og:description
+        for meta_sel in [
+            ("meta", {"property": "og:description"}),
+            ("meta", {"name": "description"}),
+        ]:
+            m = soup.find(*meta_sel)
+            if m and m.get("content"):
+                txt = m.get("content").strip()
+                if txt and len(txt) > 80:
+                    return txt
+
+        # Fallback 2) JSON-LD (application/ld+json)
+        try:
+            import json
+            for sc in soup.select("script[type='application/ld+json']"):
+                raw = (sc.string or "").strip()
+                if not raw:
+                    continue
+                try:
+                    data = json.loads(raw)
+                except Exception:
+                    continue
+                items = data if isinstance(data, list) else [data]
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+                    body = item.get("articleBody") or item.get("description")
+                    if isinstance(body, str) and len(body.strip()) > 120:
+                        return body.strip()
+        except Exception:
+            pass
+
         return soup.get_text("\n", strip=True)
 
     def _debug_context(text: str, keyword: str, width: int = 200) -> str:
@@ -159,10 +195,17 @@ def fetch_expected_range():
             # 1) 키워드(레인지/범위) 존재 여부
             probe_patterns = [
                 r"오늘\s*외환딜러\s*환율\s*예상\s*(?:레인지|범위)",
+                r"오늘\s*외환딜러\s*환율\s*예상(?:레인지|범위)",
+                r"외환딜러\s*환율\s*예상\s*(?:레인지|범위)",
+                r"\[\s*오늘\s*외환딜러\s*환율\s*예상\s*(?:레인지|범위)\s*\]",
                 r"예상\s*(?:환율\s*)?(?:레인지|범위)",
+                r"예상(?:환율)?(?:레인지|범위)",
                 r"환율\s*예상\s*(?:레인지|범위)",
+                r"환율예상(?:레인지|범위)",
             ]
             if not any(re.search(p, probe_text) for p in probe_patterns):
+                snippet = (probe_text or "")[:220]
+                print("[EXPECTED_RANGE] keyword-miss snippet=", snippet)
                 print("[EXPECTED_RANGE] skip: keyword pattern not found")
                 continue
 
