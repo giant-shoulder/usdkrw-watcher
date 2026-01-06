@@ -92,62 +92,6 @@ def fetch_expected_range():
     if "예상" not in res.text and "레인지" not in res.text and "범위" not in res.text:
         print(f"⚠️ 경고: 검색 결과 페이지가 의심스럽습니다. Status: {res.status_code}")
 
-    # 3. 후보 기사들을 순회하며 '예상 레인지/범위' 패턴이 실제로 존재하는 기사만 채택
-    #    (유료 단말기 안내 문구/무관 기사/차단 페이지는 스킵)
-    PAYWALL_HINTS = [
-        "인포맥스 금융정보 단말기",
-        "무단전재",
-        "AI 학습 및 활용 금지",
-    ]
-
-    article_url = None
-    article_soup = None
-    body_text = None
-
-    max_probe = min(12, len(candidates))
-    for idx, url in enumerate(candidates[:max_probe], start=1):
-        try:
-            print(f"[EXPECTED_RANGE] probe {idx}/{max_probe}: {url}")
-            r = _get(url)
-            r.raise_for_status()
-            s = BeautifulSoup(r.text, "html.parser")
-
-            # 본문 텍스트 추출
-            tmp_body = None
-            try:
-                tmp_body = _extract_article_text(s)
-            except Exception:
-                tmp_body = s.get_text("\n", strip=True)
-
-            # 유료/단말기 안내 페이지는 스킵
-            if any(hint in (tmp_body or "") for hint in PAYWALL_HINTS) and "예상" not in (tmp_body or ""):
-                print("[EXPECTED_RANGE] skip: paywall/terminal-only or irrelevant")
-                continue
-
-            # 범위 패턴을 기사별로 선검증 (regex는 아래에서 동일 patterns로 재사용)
-            probe_text = tmp_body or ""
-            probe_patterns = [
-                r"예상\s*(?:환율\s*)?(?:레인지|범위)",
-                r"환율\s*예상\s*(?:레인지|범위)",
-            ]
-            if not any(re.search(p, probe_text) for p in probe_patterns):
-                print("[EXPECTED_RANGE] skip: keyword pattern not found")
-                continue
-
-            # 후보 채택
-            article_url = url
-            article_soup = s
-            body_text = tmp_body
-            break
-        except Exception as e:
-            print(f"[EXPECTED_RANGE] probe error: {type(e).__name__} - {e}")
-            continue
-
-    if not article_url or not article_soup:
-        raise ValueError("❌ 기사 링크를 찾았지만, 예상 레인지/범위 패턴이 있는 기사를 찾지 못했습니다.")
-
-    article_res = None  # 아래 코드에서 status/snippet 로깅용 변수를 유지하려면 None 처리
-
     def _extract_article_text(soup: BeautifulSoup) -> str:
         """Extract main article text as reliably as possible.
 
@@ -177,6 +121,86 @@ def fetch_expected_range():
         start = max(0, i - width)
         end = min(len(text), i + len(keyword) + width)
         return text[start:end]
+
+    # 3. 후보 기사들을 순회하며 '예상 레인지/범위' 패턴이 실제로 존재하는 기사만 채택
+    #    (유료 단말기 안내 문구/무관 기사/차단 페이지는 스킵)
+    PAYWALL_HINTS = [
+        "인포맥스 금융정보 단말기",
+        "무단전재",
+        "AI 학습 및 활용 금지",
+    ]
+
+    article_url = None
+    article_soup = None
+    body_text = None
+
+    max_probe = min(12, len(candidates))
+    for idx, url in enumerate(candidates[:max_probe], start=1):
+        try:
+            print(f"[EXPECTED_RANGE] probe {idx}/{max_probe}: {url}")
+            r = _get(url)
+            r.raise_for_status()
+            s = BeautifulSoup(r.text, "html.parser")
+
+            # 본문 텍스트 추출
+            tmp_body = None
+            try:
+                tmp_body = _extract_article_text(s)
+            except Exception:
+                tmp_body = s.get_text("\n", strip=True)
+
+            # 유료/단말기 안내 페이지는 스킵(단, 본문에 실제 숫자 레인지가 있으면 통과 가능하도록 아래에서 최종 판별)
+            if any(hint in (tmp_body or "") for hint in PAYWALL_HINTS):
+                # 여기서는 일단 표시만 하고, 실제 채택 여부는 '숫자 레인지 존재'로 결정
+                print("[EXPECTED_RANGE] note: paywall/terminal hint detected")
+
+            probe_text = tmp_body or ""
+
+            # 1) 키워드(레인지/범위) 존재 여부
+            probe_patterns = [
+                r"오늘\s*외환딜러\s*환율\s*예상\s*(?:레인지|범위)",
+                r"예상\s*(?:환율\s*)?(?:레인지|범위)",
+                r"환율\s*예상\s*(?:레인지|범위)",
+            ]
+            if not any(re.search(p, probe_text) for p in probe_patterns):
+                print("[EXPECTED_RANGE] skip: keyword pattern not found")
+                continue
+
+            # 2) 숫자 레인지(예: 1,445~1,455) 실제 포함 여부 (가장 중요)
+            range_probe_patterns = [
+                r"([\d,]{3,5}(?:\.[\d]+)?)\s*[~\-–]\s*([\d,]{3,5}(?:\.[\d]+)?)\s*원?",
+                r"예상\s*(?:환율\s*)?(?:레인지|범위)\s*[:：]?\s*([\d,\.]+)\s*[~\-–]\s*([\d,\.]+)",
+            ]
+            has_numeric_range = False
+            for pat in range_probe_patterns:
+                if re.search(pat, probe_text):
+                    has_numeric_range = True
+                    break
+
+            # 유료/단말기 안내 페이지는 '키워드만 있고 숫자가 없는' 경우가 많아 숫자 레인지가 없으면 스킵
+            if any(hint in probe_text for hint in PAYWALL_HINTS) and not has_numeric_range:
+                print("[EXPECTED_RANGE] skip: paywall/terminal-only and no numeric range")
+                continue
+
+            if not has_numeric_range:
+                print("[EXPECTED_RANGE] skip: no numeric range in article")
+                continue
+
+            # 후보 채택 (키워드 + 숫자 레인지 모두 존재)
+            article_url = url
+            article_soup = s
+            body_text = tmp_body
+            break
+        except Exception as e:
+            print(f"[EXPECTED_RANGE] probe error: {type(e).__name__} - {e}")
+            continue
+
+    if not article_url or not article_soup:
+        raise ValueError("❌ 기사 링크를 찾았지만, 예상 레인지/범위 패턴이 있는 기사를 찾지 못했습니다.")
+
+    print(f"[EXPECTED_RANGE] ✅ selected article: {article_url}")
+
+    article_res = None  # 아래 코드에서 status/snippet 로깅용 변수를 유지하려면 None 처리
 
     # 배포 환경에서 종종 200으로 차단/안내 페이지가 내려오는 경우가 있어, 본문이 비정상적으로 짧으면 차단 의심
     if len(body_text) < 300:
